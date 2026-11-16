@@ -39,7 +39,17 @@ var ICONS = {
   key: '<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3"/>',
   pause: '<path d="M8.5 5v14M15.5 5v14" stroke-width="2.6"/>',
   play: '<path d="M7.5 5.2v13.6a.6.6 0 0 0 .9.5l10.6-6.8a.6.6 0 0 0 0-1L8.4 4.7a.6.6 0 0 0-.9.5z" fill="currentColor"/>',
-  more: '<circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/>'
+  more: '<circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/>',
+  gear: '<circle cx="12" cy="12" r="3.2"/><path d="M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.6-2-3.4-2.4 1a7.4 7.4 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.5A7.4 7.4 0 0 0 7 6.5l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 3l-2 1.6 2 3.4 2.4-1a7.4 7.4 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.4 7.4 0 0 0 2.6-1.5l2.4 1 2-3.4z"/>',
+  map: '<path d="M9 4 3 6.5V20l6-2.5 6 2.5 6-2.5V4l-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/>',
+  eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+  locate: '<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.4" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/>',
+  ghost: '<path d="M5 20V10a7 7 0 0 1 14 0v10l-2.4-1.6L14.3 20 12 18.4 9.7 20l-2.3-1.6z"/><circle cx="9.5" cy="10.5" r="1" fill="currentColor"/><circle cx="14.5" cy="10.5" r="1" fill="currentColor"/>',
+  chev: '<path d="m9 5 7 7-7 7"/>',
+  doc: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/>',
+  shield: '<path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.2 7.5 9.5 4.3-1.3 7.5-4.9 7.5-9.5V6z"/>',
+  spark: '<path d="M12 3l2.2 5.6L20 11l-5.8 2.4L12 19l-2.2-5.6L4 11l5.8-2.4z"/>',
+  chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'
 };
 function icon(n) { var s = document.createElement('span'); s.className = 'ico'; s.innerHTML = SV + (ICONS[n] || '') + '</svg>'; return s; }
 $$('[data-ico]').forEach(function (el) { el.innerHTML = SV + (ICONS[el.getAttribute('data-ico')] || '') + '</svg>'; });
@@ -74,8 +84,9 @@ function who(uid) {
   var u = S.users[uid] || {};
   return { name: u.name || u.handle || 'Quelqu’un', handle: u.handle || '', bio: u.bio || '', avatar: u.avatar || '' };
 }
-var PALETTE = ['#D81B55', '#7A3B4C', '#A3456A', '#5C2E3E', '#C2577A'];
-function colorOf(uid) { var n = 0; for (var i = 0; i < (uid || '').length; i++) n = (n * 31 + uid.charCodeAt(i)) >>> 0; return PALETTE[n % PALETTE.length]; }
+// couleurs d'avatar tirées de la couleur vive du thème (visibles de jour comme de nuit)
+var PALETTE = [100, 62, 82, 50, 72];
+function colorOf(uid) { var n = 0; for (var i = 0; i < (uid || '').length; i++) n = (n * 31 + uid.charCodeAt(i)) >>> 0; return 'color-mix(in srgb,var(--hot) ' + PALETTE[n % PALETTE.length] + '%,#000)'; }
 function avatar(uid, size, withOnline) {
   var w = who(uid), el = h('span', { class: 'av', style: '--s:' + (size || 36) + 'px;--avc:' + colorOf(uid) });
   if (w.avatar) el.append(h('img', { src: w.avatar, alt: '', loading: 'lazy' }));
@@ -96,6 +107,39 @@ function applyState(st) {
   S.online = new Set(st.online || []);
 }
 
+/* ================================================================ apparence, réglages, offres */
+var THEMES = [
+  { id: 'bulle', name: 'Bulle', sw: ['#F6B6C8', '#140D10'] },
+  { id: 'lagon', name: 'Lagon', sw: ['#B9DDF7', '#0B1621'] },
+  { id: 'menthe', name: 'Menthe', sw: ['#BDEBD3', '#0B1A12'] },
+  { id: 'lilas', name: 'Lilas', sw: ['#DAC8F6', '#150D20'], plus: true },
+  { id: 'soleil', name: 'Soleil', sw: ['#FFD8A1', '#1E1206'], plus: true },
+  { id: 'encre', name: 'Encre', sw: ['#ECECEC', '#111111'], plus: true }
+];
+var PREFS = Object.assign({ mode: 'auto', theme: 'bulle', notif: true, preview: true, heads: true }, LS.get('prefs', {}));
+function savePrefs() { LS.set('prefs', PREFS); }
+var darkMQ = window.matchMedia('(prefers-color-scheme: dark)');
+function hasPlus() { return !!(S.me && (S.me.plan === 'plus' || S.me.plan === 'pro')); }
+function isPro() { return !!(S.me && S.me.plan === 'pro'); }
+function applyLook() {
+  var t = THEMES.find(function (x) { return x.id === PREFS.theme; }) || THEMES[0];
+  if (t.plus && S.me && !hasPlus()) t = THEMES[0]; // thème Bulle+ sans abonnement : retour au thème de base
+  var root = document.documentElement;
+  root.setAttribute('data-theme', t.id);
+  root.setAttribute('data-scheme', PREFS.mode === 'auto' ? (darkMQ.matches ? 'dark' : 'light') : PREFS.mode);
+  var m = $('meta[name="theme-color"]'); if (m) m.setAttribute('content', getComputedStyle(root).getPropertyValue('--bg').trim());
+  setTiles();
+}
+if (darkMQ.addEventListener) darkMQ.addEventListener('change', applyLook); else if (darkMQ.addListener) darkMQ.addListener(applyLook);
+function privacy() { return Object.assign({ showOnline: true, readReceipts: true, ghost: false, dms: 'all' }, (S.me && S.me.privacy) || {}); }
+function updateMe(body, okMsg) {
+  return attempt(call('PUT', '/api/profile', body), okMsg).then(function (r) { if (r && r.me) { S.me = r.me; S.users[r.me.id] = r.me; } return r; });
+}
+function setPrivacy(patch) {
+  return updateMe({ privacy: Object.assign(privacy(), patch) }).then(function (r) { if (r) { renderSheetDyn(); if (patch.ghost != null) refreshPlaces(); } return r; });
+}
+function tierChip(plan, big) { if (plan !== 'plus' && plan !== 'pro') return null; return h('span', { class: 'tier' + (big ? ' big' : ''), title: plan === 'pro' ? 'Bulle Pro' : 'Bulle+', text: plan === 'pro' ? 'PRO' : '+' }); }
+
 /* ================================================================ images */
 function loadBitmap(file) {
   if (window.createImageBitmap) return createImageBitmap(file, { imageOrientation: 'from-image' }).catch(function () { return viaImg(file); });
@@ -114,6 +158,57 @@ function shrink(file, max, q) {
       if (u.length < 5.5e6) return u;
     }
     throw new Error('Image trop lourde.');
+  });
+}
+// Recadrage de la photo de profil : glisser pour déplacer, pincer / molette / curseur pour zoomer.
+// Renvoie une image carrée de 512 px (data URL), ou null si on annule.
+function cropPhoto(file) {
+  return loadBitmap(file).then(function (bmp) {
+    // copie réduite pour un affichage fluide pendant les gestes
+    var k0 = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    var src = document.createElement('canvas'); src.width = Math.round(bmp.width * k0); src.height = Math.round(bmp.height * k0);
+    src.getContext('2d').drawImage(bmp, 0, 0, src.width, src.height);
+    return new Promise(function (resolve) {
+      var W = 280, dpr = Math.min(2, window.devicePixelRatio || 1), z = 1, base = Math.max(W / src.width, W / src.height);
+      var cv = h('canvas', { width: String(Math.round(W * dpr)), height: String(Math.round(W * dpr)) });
+      var stage = h('div', { class: 'crop-stage', 'aria-label': 'Zone de recadrage' }, cv);
+      var range = h('input', { type: 'range', min: '1', max: '4', step: '0.01', value: '1', 'aria-label': 'Zoom' });
+      var ox, oy, raf = 0, done = false;
+      function sc() { return base * z; }
+      function clamp() { var s = sc(); ox = Math.min(0, Math.max(W - src.width * s, ox)); oy = Math.min(0, Math.max(W - src.height * s, oy)); }
+      function draw() { if (raf) return; raf = requestAnimationFrame(function () { raf = 0; clamp(); var c = cv.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.fillStyle = '#000'; c.fillRect(0, 0, W, W); c.drawImage(src, ox, oy, src.width * sc(), src.height * sc()); }); }
+      function zoomTo(nz, cx, cy) {
+        nz = Math.max(1, Math.min(4, nz)); if (cx == null) { cx = W / 2; cy = W / 2; }
+        var s0 = sc(), ix = (cx - ox) / s0, iy = (cy - oy) / s0; z = nz; var s1 = sc();
+        ox = cx - ix * s1; oy = cy - iy * s1; range.value = String(z); draw();
+      }
+      ox = (W - src.width * sc()) / 2; oy = (W - src.height * sc()) / 2;
+      var pts = new Map(), pinch = null;
+      function spread() { var a = Array.from(pts.values()); return Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y); }
+      function mid() { var a = Array.from(pts.values()), r = stage.getBoundingClientRect(); return { x: (a[0].x + a[1].x) / 2 - r.left, y: (a[0].y + a[1].y) / 2 - r.top }; }
+      stage.addEventListener('pointerdown', function (e) { stage.setPointerCapture(e.pointerId); pts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pts.size === 2) pinch = { d: spread(), z: z }; });
+      stage.addEventListener('pointermove', function (e) {
+        var prev = pts.get(e.pointerId); if (!prev) return; pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pts.size === 1) { ox += e.clientX - prev.x; oy += e.clientY - prev.y; draw(); }
+        else if (pts.size === 2 && pinch) { var m = mid(); zoomTo(pinch.z * spread() / pinch.d, m.x, m.y); }
+      });
+      function up(e) { pts.delete(e.pointerId); if (pts.size < 2) pinch = null; }
+      stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up);
+      stage.addEventListener('wheel', function (e) { e.preventDefault(); var r = stage.getBoundingClientRect(); zoomTo(z * (e.deltaY < 0 ? 1.1 : 1 / 1.1), e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+      range.addEventListener('input', function () { zoomTo(+range.value); });
+      function finish(v) { if (done) return; done = true; closeSheet(); resolve(v); }
+      openSheet('Recadrer la photo', h('div', { class: 'crop' }, stage,
+        h('label', { class: 'crop-zoom' }, 'Zoom', range),
+        h('p', { class: 'hint', text: 'Glisse la photo pour la placer dans le rond. Pince ou utilise le curseur pour zoomer.' }),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn', type: 'button', onclick: function () { finish(null); } }, 'Annuler'),
+          h('button', { class: 'btn primary', type: 'button', onclick: function () {
+            clamp(); var out = document.createElement('canvas'); out.width = 512; out.height = 512; var k = 512 / W;
+            out.getContext('2d').drawImage(src, ox * k, oy * k, src.width * sc() * k, src.height * sc() * k);
+            finish(out.toDataURL('image/jpeg', 0.86));
+          } }, 'Valider'))), { type: 'crop' });
+      draw();
+    });
   });
 }
 
@@ -223,16 +318,36 @@ function burst(x, y) {
 
 function renderChatList() {
   var box = $('#chatlist'); box.replaceChildren();
+  // invitation à activer les notifications (une seule fois, tant que le navigateur n'a rien répondu)
+  if ('Notification' in window && Notification.permission === 'default' && !LS.get('notifAsked', false)) {
+    box.append(h('div', { class: 'card ask' }, h('h3', { text: 'Ne rate aucun message' }), h('p', { text: 'Active les notifications pour savoir tout de suite quand on t’écrit.' }),
+      h('div', { class: 'row' }, h('button', { class: 'btn small', type: 'button', onclick: function () { LS.set('notifAsked', true); renderChatList(); } }, 'Plus tard'),
+        h('button', { class: 'btn small primary', type: 'button', onclick: enableNotifs }, icon('bell'), 'Activer'))));
+  }
   visibleChats().forEach(function (c) {
     var un = isUnread(c), typers = typersIn(c.id), other = otherOf(c);
     var prev = typers.length ? h('span', { class: 'typing-txt', text: (c.kind === 'group' ? who(typers[0]).name + ' ' : '') + 'écrit…' })
       : h('span', { text: c.lastText ? ((c.lastBy === S.me.id ? 'Toi : ' : (c.kind === 'group' && c.lastBy ? who(c.lastBy).name + ' : ' : '')) + c.lastText) : (c.kind === 'group' ? 'Tout le monde peut écrire ici' : 'Nouvelle discussion') });
-    box.append(h('button', { class: 'crow' + (un ? ' unread' : ''), type: 'button', onclick: function () { openChat(c); } },
+    box.append(h('div', { class: 'crow-w' }, h('button', { class: 'crow' + (un ? ' unread' : ''), type: 'button', onclick: function () { openChat(c); } },
       c.kind === 'group' ? groupAvatar(52) : avatar(other, 52, true),
       h('span', { class: 't' }, h('b', { text: chatTitle(c) }), prev),
-      h('span', { class: 'meta' }, c.lastAt ? h('time', { text: ago(c.lastAt) }) : (c.kind === 'group' ? h('time', { text: S.online.size + ' en ligne' }) : null), un ? h('span', { class: 'udot', 'aria-label': 'Non lu' }) : null)));
+      h('span', { class: 'meta' }, c.lastAt ? h('time', { text: ago(c.lastAt) }) : (c.kind === 'group' ? h('time', { text: S.online.size + ' en ligne' }) : null), un ? h('span', { class: 'udot', 'aria-label': 'Non lu' }) : null)),
+      un && c.kind === 'dm' ? h('button', { class: 'peekbtn', type: 'button', 'aria-label': 'Entrouvrir le message de ' + chatTitle(c) + ' sans le marquer comme lu', onclick: function () { peek(c); } }, icon('eye'), hasPlus() ? null : h('span', { class: 'tier', text: '+' })) : null));
   });
   box.append(h('button', { class: 'btn block', type: 'button', style: 'margin-top:12px', onclick: openNewChat }, icon('edit'), 'Écrire à quelqu’un'));
+}
+// Bulle+ : lire les derniers messages sans les marquer comme lus
+function peek(c) {
+  if (!hasPlus()) { openPlans('Entrouvrir un message sans qu’il soit marqué comme lu, c’est avec Bulle+.'); return; }
+  var name = chatTitle(c), list = h('div', { class: 'peek' }, h('p', { class: 'hint', text: 'Chargement…' }));
+  openSheet('Entrouvert', h('div', { class: 'form' },
+    h('p', { class: 'peek-note' }, icon('eye'), name + ' ne saura pas que tu as lu. La discussion reste non lue.'), list,
+    h('button', { class: 'btn primary', type: 'button', onclick: function () { openChat(c); } }, 'Ouvrir la discussion')), { type: 'peek' });
+  call('GET', '/api/chats/' + c.id + '/messages').then(function (r) {
+    var seenAt = readMap()[c.id] || 0;
+    var fresh = r.messages.filter(function (m) { return m.by !== S.me.id && m.at > seenAt; }).slice(-5);
+    list.replaceChildren.apply(list, fresh.length ? fresh.map(function (m) { return h('div', { class: 'bub', text: m.text || '📷 Photo' }); }) : [h('p', { class: 'hint', text: 'Rien de nouveau.' })]);
+  }, function () { list.replaceChildren(h('p', { class: 'hint', text: 'Impossible de lire les messages.' })); });
 }
 
 /* ---------------- discussion ouverte */
@@ -277,7 +392,13 @@ function renderMsgs() {
     if (m.reply === 'snap') col.append(h('span', { class: 'rtag', text: mine ? 'Tu as répondu à un snap' : 'A répondu à ton snap' }));
     if (m.img) col.append(h('button', { class: 'bub pic', type: 'button', 'aria-label': 'Agrandir la photo', onclick: function () { viewImage(m.img); } }, cachedImg('m' + m.id, m.img, 'Photo envoyée')));
     if (m.text) col.append(h('div', { class: 'bub', text: m.text }));
-    if (last) col.append(h('span', { class: 'mtime', text: hhmm(m.at) }));
+    // dernier message envoyé en privé : « Vu » ou « Envoyé » (si les confirmations de lecture sont actives)
+    var status = '';
+    if (mine && !group && i === ms.length - 1) {
+      var seenAt = (c.seen || {})[otherOf(c)] || 0;
+      status = privacy().readReceipts && seenAt >= m.at ? ' · Vu' : ' · Envoyé';
+    }
+    if (last) col.append(h('span', { class: 'mtime', text: hhmm(m.at) + status }));
     var row = h('div', { class: 'mrow ' + (mine ? 'me' : 'them') + (last ? ' last' : '') });
     if (!mine) row.append(last ? avatar(m.by, 28) : h('span', { class: 'spacer' }));
     row.append(col); box.append(row);
@@ -314,9 +435,10 @@ function renderProfile() {
   var snaps = S.stories.filter(function (s) { return s.by === uid && s.at > Date.now() - DAY; });
   var pf = h('div', { class: 'pf' });
   if (!mine) pf.append(h('button', { class: 'linkish', type: 'button', onclick: function () { S.viewUid = null; renderProfile(); } }, '← Mon profil'));
+  else pf.append(h('div', { class: 'pf-bar' }, h('button', { class: 'iconbtn', type: 'button', 'aria-label': 'Paramètres', onclick: openSettings }, icon('gear'))));
   pf.append(h('div', { class: 'pf-head' },
     h('button', { class: 'pf-av' + (snaps.length ? '' : ' plain'), type: 'button', 'aria-label': snaps.length ? 'Voir ses snaps' : 'Photo de profil', onclick: function () { if (!snaps.length) return; var gs = storyGroups(); var i = gs.findIndex(function (g) { return g.uid === uid; }); if (i >= 0) openStories(gs, i); } }, avatar(uid, 88)),
-    h('div', { class: 'pf-id' }, h('h1', { class: 'pf-name', text: w.name }), h('p', { class: 'pf-handle', text: '@' + w.handle }), !mine && S.online.has(uid) ? h('p', { class: 'on-line', text: 'En ligne' }) : null)));
+    h('div', { class: 'pf-id' }, h('h1', { class: 'pf-name' }, w.name, tierChip((S.users[uid] || {}).plan, true)), h('p', { class: 'pf-handle', text: '@' + w.handle }), !mine && S.online.has(uid) ? h('p', { class: 'on-line', text: 'En ligne' }) : null)));
   if (w.bio) pf.append(h('p', { class: 'pf-bio', text: w.bio }));
   pf.append(h('dl', { class: 'pf-stats' },
     h('div', {}, h('dt', { text: posts.length > 1 ? 'publications' : 'publication' }), h('dd', { text: String(posts.length) })),
@@ -326,8 +448,163 @@ function renderProfile() {
   else pf.append(h('div', { class: 'pf-acts' }, h('button', { class: 'btn primary', type: 'button', onclick: function () { openChat(dmFor(uid)); } }, icon('send'), 'Envoyer un message')));
   if (posts.length) pf.append(h('div', { class: 'grid' }, posts.map(function (p) { return h('button', { type: 'button', 'aria-label': 'Ouvrir la publication', onclick: function () { openPost(p.id); } }, cachedImg('g' + p.id, p.img, '')); })));
   else pf.append(h('p', { class: 'muted', style: 'color:var(--muted)', text: mine ? 'Tes photos apparaîtront ici.' : 'Aucune publication pour le moment.' }));
-  if (mine) { pf.append(installCard()); pf.append(settingsList()); }
+  if (mine) {
+    pf.append(proCard(posts, snaps));
+    pf.append(installCard());
+    pf.append(h('div', { class: 'settings' }, navRow('gear', 'Paramètres et confidentialité', openSettings)));
+  }
   box.append(pf);
+}
+// Statistiques (Bulle Pro) — sinon un aperçu qui donne envie
+function proCard(posts, snaps) {
+  if (!isPro()) {
+    return h('button', { class: 'promo', type: 'button', onclick: function () { openPlans(); } }, icon('chart'),
+      h('span', { class: 'x' }, h('b', { text: 'Tes statistiques' }), h('small', { text: 'Vues, j’aime, meilleure photo : avec Bulle Pro.' })), icon('chev'));
+  }
+  var week = Date.now() - 7 * DAY, recent = posts.filter(function (p) { return p.at > week; });
+  var likes = recent.reduce(function (n, p) { return n + p.likes.length; }, 0);
+  var comments = recent.reduce(function (n, p) { return n + p.comments.filter(function (c) { return c.by !== S.me.id; }).length; }, 0);
+  var views = snaps.reduce(function (n, s) { return n + (s.views || []).length; }, 0);
+  var best = posts.slice().sort(function (a, b) { return b.likes.length - a.likes.length; })[0];
+  return h('div', { class: 'card' }, h('h3', { text: 'Statistiques · 7 jours' }),
+    h('div', { class: 'stats' },
+      h('div', {}, h('b', { text: String(recent.length) }), h('small', { text: 'publications' })),
+      h('div', {}, h('b', { text: String(likes) }), h('small', { text: 'j’aime reçus' })),
+      h('div', {}, h('b', { text: String(comments) }), h('small', { text: 'commentaires reçus' })),
+      h('div', {}, h('b', { text: String(views) }), h('small', { text: 'vues de tes snaps actifs' }))),
+    best && best.likes.length ? h('p', { text: 'Ta photo la plus aimée a ' + best.likes.length + ' j’aime. Publie à la même heure pour toucher plus de monde.' }) : h('p', { text: 'Publie une photo pour voir tes premiers chiffres.' }));
+}
+function navRow(ic, label, fn, sub) {
+  return h('button', { class: 'setrow', type: 'button', onclick: fn }, icon(ic), h('span', { class: 'x' }, h('span', { text: label }), sub ? h('small', { class: 'sub', text: sub }) : null), h('span', { class: 'chev' }, icon('chev')));
+}
+function swRow(label, on, fn, sub, disabled) {
+  var b = h('button', { class: 'setrow', type: 'button', role: 'switch', 'aria-checked': String(!!on), 'aria-disabled': disabled ? 'true' : null, onclick: function () {
+    if (disabled) { if (typeof disabled === 'function') disabled(); return; }
+    var v = b.getAttribute('aria-checked') !== 'true'; b.setAttribute('aria-checked', String(v)); fn(v);
+  } }, h('span', { class: 'x', style: 'flex:1' }, h('span', { text: label }), sub ? h('small', { class: 'sub', text: sub }) : null), h('span', { class: 'sw', 'aria-hidden': 'true' }));
+  return b;
+}
+
+/* ---------------- paramètres */
+function openSettings() {
+  openSheet('Paramètres', h('div', { id: 'set-body', class: 'set' }), { type: 'settings' });
+  renderSettings();
+}
+function renderSettings() {
+  var body = $('#set-body'); if (!body || !S.me) return;
+  var card = body.closest('.sheet-card'), keep = card ? card.scrollTop : 0;
+  body.replaceChildren();
+  function sec(title, kids, hint) { body.append(h('section', { class: 'setsec' }, h('h3', { text: title }), h('div', { class: 'settings' }, kids), hint ? h('p', { class: 'hint', text: hint }) : null)); }
+
+  // offre
+  var plan = S.me.plan || 'free';
+  body.append(h('button', { class: 'promo', type: 'button', onclick: function () { openPlans(); } }, icon('spark'),
+    h('span', { class: 'x' }, h('b', { text: plan === 'pro' ? 'Bulle Pro' : plan === 'plus' ? 'Bulle+' : 'Passe à Bulle+' }), h('small', { text: plan === 'free' ? 'Thèmes exclusifs, entrouvrir les messages, badge…' : 'Ton offre est active. Gérer mon offre' })), icon('chev')));
+
+  sec('Compte', [navRow('edit', 'Modifier le profil', function () { closeSheet(); S.viewUid = null; switchTab('profile'); editProfile(); }, 'Photo, nom affiché, bio')]);
+
+  // apparence
+  var seg = h('div', { class: 'seg three', role: 'radiogroup', 'aria-label': 'Mode d’affichage' }, [['auto', 'Auto'], ['light', 'Jour'], ['dark', 'Nuit']].map(function (o) {
+    return h('button', { type: 'button', role: 'radio', 'aria-checked': String(PREFS.mode === o[0]), onclick: function () { PREFS.mode = o[0]; savePrefs(); applyLook(); renderSettings(); } }, o[1]);
+  }));
+  var sws = h('div', { class: 'swatches' }, THEMES.map(function (t) {
+    var locked = t.plus && !hasPlus(), cur = (PREFS.theme === t.id) && !locked;
+    return h('button', { class: 'swatch', type: 'button', 'aria-pressed': String(cur), 'aria-label': 'Thème ' + t.name + (locked ? ', réservé à Bulle+' : ''), onclick: function () {
+      if (locked) { openPlans('Le thème ' + t.name + ' fait partie de Bulle+.'); return; }
+      PREFS.theme = t.id; savePrefs(); applyLook(); renderSettings();
+    } }, h('span', { class: 'sw-dot', style: 'background:' + t.sw[0] + ';--ink:' + t.sw[1] }, h('i')), h('small', { text: t.name }), locked ? h('span', { class: 'tier', text: '+' }) : null);
+  }));
+  body.append(h('section', { class: 'setsec' }, h('h3', { text: 'Apparence' }), seg, sws,
+    h('p', { class: 'hint', text: 'Auto suit le réglage jour/nuit de ton téléphone ou de ton ordinateur.' })));
+
+  // notifications
+  var perm = 'Notification' in window ? Notification.permission : 'unsupported';
+  var notifOn = PREFS.notif && perm === 'granted';
+  sec('Notifications', [
+    swRow('Notifications de messages', notifOn, function (v) { if (v) enableNotifs(); else { PREFS.notif = false; savePrefs(); renderSettings(); } },
+      perm === 'denied' ? 'Bloquées par le navigateur : autorise-les dans les réglages du site (cadenas à côté de l’adresse).' : perm === 'unsupported' ? (isIOS && !standalone ? 'Sur iPhone, installe d’abord Bulle sur l’écran d’accueil.' : 'Pas disponibles sur ce navigateur.') : 'Une alerte quand Bulle est en arrière-plan.',
+      perm === 'denied' || perm === 'unsupported'),
+    swRow('Aperçu du message', PREFS.preview, function (v) { PREFS.preview = v; savePrefs(); }, 'Sinon la notification dit juste « Nouveau message ».'),
+    swRow('Bandeau dans l’app', PREFS.heads, function (v) { PREFS.heads = v; savePrefs(); }, 'Un bandeau en haut de l’écran quand un message arrive ailleurs.'),
+    notifOn ? navRow('bell', 'Tester une notification', function () { testNotif(); }) : null
+  ], 'Version test : les notifications arrivent tant que Bulle est ouverte ou en arrière-plan. Quand l’app est complètement fermée, il faudra le serveur.');
+
+  // confidentialité
+  var pv = privacy();
+  sec('Confidentialité', [
+    swRow('Mode fantôme', pv.ghost, function (v) { setPrivacy({ ghost: v }); }, 'Tes amis ne voient plus ta position sur la carte.'),
+    swRow('Afficher quand je suis en ligne', pv.showOnline, function (v) { setPrivacy({ showOnline: v }); }, 'Le point vert à côté de ta photo.'),
+    swRow('Confirmations de lecture', pv.readReceipts, function (v) { setPrivacy({ readReceipts: v }); }, 'Si tu les coupes, tu ne vois plus non plus quand les autres ont lu (« Vu »).'),
+    h('div', { class: 'setrow', style: 'cursor:default;flex-wrap:wrap' }, h('span', { class: 'x', style: 'flex:1' }, h('span', { text: 'Qui peut m’écrire' })),
+      h('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'Qui peut m’écrire', style: 'width:100%' }, [['all', 'Tout le monde'], ['friends', 'Mes amis']].map(function (o) {
+        return h('button', { type: 'button', role: 'radio', 'aria-checked': String(pv.dms === o[0]), onclick: function () { setPrivacy({ dms: o[0] }); } }, o[1]);
+      })))
+  ], 'Version test : tout est enregistré. Le mode fantôme et les confirmations de lecture marchent déjà ; les autres réglages s’appliqueront à tes vrais contacts avec le serveur.');
+
+  sec('Informations légales', [
+    navRow('doc', 'Conditions d’utilisation', function () { openLegal('cgu.html', 'Conditions d’utilisation'); }),
+    navRow('shield', 'Politique de confidentialité', function () { openLegal('confidentialite.html', 'Confidentialité'); })
+  ]);
+  sec('Mes données', [
+    navRow('download', 'Télécharger mes données', exportData, 'Un fichier avec ton profil, tes photos et tes messages'),
+    navRow('trash', 'Tout effacer et recommencer', confirmReset)
+  ]);
+  body.append(h('div', { class: 'card' }, h('h3', { text: 'Version test' }),
+    h('p', { text: 'Tout est enregistré sur cet appareil uniquement : rien n’est envoyé sur Internet. Lou, Inès et Malo sont des contacts d’exemple qui répondent automatiquement. Les vrais messages entre amis arriveront avec le serveur.' })));
+  if (card) card.scrollTop = keep;
+}
+function enableNotifs() {
+  if (!('Notification' in window)) { toast('Notifications indisponibles ici.'); renderSettings(); return; }
+  Notification.requestPermission().then(function (p) {
+    PREFS.notif = p === 'granted'; savePrefs(); LS.set('notifAsked', true);
+    if (p === 'granted') testNotif('Les notifications sont activées.'); else toast('Notifications refusées.');
+    renderSettings(); renderChatList();
+  });
+}
+function testNotif(text) {
+  var opts = { body: text || 'Voilà à quoi ressemble un nouveau message.', icon: 'icons/icon-192.png', badge: 'icons/favicon-32.png', tag: 'bulle-test' };
+  if (swReg) swReg.showNotification('Bulle', opts).catch(function () {}); else try { new Notification('Bulle', opts); } catch (e) { /* rien */ }
+}
+function openLegal(url, title) {
+  openSheet(title, h('div', { class: 'form' }, h('iframe', { class: 'legal-frame', src: url, title: title }),
+    h('a', { class: 'btn small', href: url, target: '_blank', rel: 'noopener' }, 'Ouvrir en pleine page')), { type: 'legal' });
+}
+function exportData() {
+  attempt(call('GET', '/api/export')).then(function (d) {
+    if (!d) return;
+    var a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' })), download: 'bulle-mes-donnees.json' });
+    document.body.append(a); a.click(); a.remove(); toast('Fichier bulle-mes-donnees.json enregistré');
+  });
+}
+
+/* ---------------- offres Bulle+ et Bulle Pro */
+var PLANS = [
+  { id: 'plus', name: 'Bulle+', price: '2,99 € / mois', perks: ['Entrouvrir un message sans qu’il soit marqué comme lu', '3 thèmes exclusifs : Lilas, Soleil, Encre', 'Voir qui a regardé tes snaps (pas seulement le nombre)', 'Le badge + sur ton profil'] },
+  { id: 'pro', name: 'Bulle Pro', price: '6,99 € / mois', perks: ['Tout Bulle+', 'Tes statistiques : publications, j’aime, commentaires, vues', 'Le badge PRO sur ton profil', 'Pour les créateurs, artistes et petits commerces'] }
+];
+function openPlans(reason) {
+  openSheet('Bulle+ et Pro', h('div', { id: 'plans-body', class: 'plans' }), { type: 'plans', reason: reason });
+  renderPlans();
+}
+function renderPlans() {
+  var box = $('#plans-body'); if (!box) return; box.replaceChildren();
+  var cur = S.me.plan || 'free';
+  if (S.sheet && S.sheet.reason) box.append(h('p', { style: 'font-weight:700', text: S.sheet.reason }));
+  PLANS.forEach(function (p) {
+    var mine = cur === p.id;
+    box.append(h('div', { class: 'plan' + (mine ? ' cur' : '') },
+      h('div', { class: 'plan-h' }, h('h3', {}, p.name), h('span', { text: p.price })),
+      h('ul', {}, p.perks.map(function (x) { return h('li', { text: x }); })),
+      mine ? h('button', { class: 'btn', type: 'button', onclick: function () { setPlan('free'); } }, 'Arrêter ' + p.name)
+        : h('button', { class: 'btn primary', type: 'button', onclick: function () { setPlan(p.id); } }, 'Essayer gratuitement')));
+  });
+  box.append(h('p', { class: 'hint', text: 'Version test : aucun paiement, l’essai est gratuit et s’arrête quand tu veux. Le vrai paiement arrivera avec le serveur.' }));
+}
+function setPlan(id) {
+  var names = { free: '', plus: 'Bulle+', pro: 'Bulle Pro' };
+  updateMe({ plan: id }, id === 'free' ? 'Offre arrêtée' : 'Bienvenue dans ' + names[id] + ' ✨').then(function (r) {
+    if (!r) return; applyLook(); renderPlans(); renderProfile(); renderChatList();
+  });
 }
 function installCard() {
   if (standalone) return null;
@@ -344,15 +621,6 @@ function installCard() {
   }
   return h('div', { class: 'card' }, h('h3', { text: 'Installer Bulle' }), h('p', { text: 'Dans le menu du navigateur (⋮), choisis « Installer l’application » ou « Ajouter à l’écran d’accueil ».' }));
 }
-function settingsList() {
-  var notifState = !('Notification' in window) ? 'Non disponible ici' : Notification.permission === 'granted' ? 'Activées' : Notification.permission === 'denied' ? 'Bloquées dans le navigateur' : 'Désactivées';
-  return h('div', { class: 'settings' },
-    'Notification' in window && Notification.permission === 'default' ? h('button', { class: 'setrow', type: 'button', onclick: function () { Notification.requestPermission().then(function () { renderProfile(); }); } }, icon('bell'), h('span', { class: 'x', text: 'Notifications de messages' }), h('small', { text: notifState })) :
-      h('div', { class: 'setrow', style: 'cursor:default' }, icon('bell'), h('span', { class: 'x', text: 'Notifications de messages' }), h('small', { text: notifState })),
-    h('button', { class: 'setrow', type: 'button', onclick: confirmReset }, icon('trash'), h('span', { class: 'x', text: 'Tout effacer et recommencer' })),
-    h('div', { class: 'card' }, h('h3', { text: 'Version test' }),
-      h('p', { text: 'Tout est enregistré sur cet appareil uniquement : rien n’est envoyé sur Internet. Lou, Inès et Malo sont des contacts d’exemple qui répondent automatiquement. Les vrais messages entre amis arriveront avec le serveur.' })));
-}
 function confirmReset() {
   openSheet('Tout effacer ?', h('div', { class: 'form' },
     h('p', { text: 'Ton profil, tes photos, tes snaps et tes messages seront supprimés de cet appareil. Impossible de revenir en arrière.' }),
@@ -361,20 +629,30 @@ function confirmReset() {
 }
 function editProfile() {
   S.editing = true; var w = who(S.me.id), box = $('#profile'); box.replaceChildren();
-  var newAvatar = null;
+  var newAvatar = null, dropAvatar = false;
   var ni = h('input', { id: 'pf-name', maxlength: '40', value: w.name, autocomplete: 'nickname' });
   var bi = h('textarea', { id: 'pf-bio', rows: '3', maxlength: '150', placeholder: 'Quelques mots sur toi' }); bi.value = w.bio;
   var prevBox = h('span', {}, avatar(S.me.id, 88));
   var fi = h('input', { type: 'file', id: 'pf-file', accept: 'image/*', hidden: true });
-  fi.addEventListener('change', function () { var f = fi.files[0]; if (!f) return; shrink(f, 512, 0.85).then(function (u) { newAvatar = u; prevBox.replaceChildren(h('span', { class: 'av', style: '--s:88px' }, h('img', { src: u, alt: '' }))); }, function () { toast('Cette image n’a pas pu être lue.'); }); });
+  var rm = h('button', { class: 'linkish', type: 'button', hidden: !w.avatar, onclick: function () {
+    newAvatar = null; dropAvatar = true; rm.hidden = true;
+    prevBox.replaceChildren(h('span', { class: 'av', style: '--s:88px;--avc:' + colorOf(S.me.id) }, (w.name || '?').charAt(0).toUpperCase()));
+  } }, 'Retirer la photo');
+  fi.addEventListener('change', function () {
+    var f = fi.files[0]; fi.value = ''; if (!f) return;
+    cropPhoto(f).then(function (u) {
+      if (!u) return; newAvatar = u; dropAvatar = false; rm.hidden = false;
+      prevBox.replaceChildren(h('span', { class: 'av', style: '--s:88px' }, h('img', { src: u, alt: '' })));
+    }, function () { toast('Cette image n’a pas pu être lue.'); });
+  });
   var save = h('button', { class: 'btn primary', type: 'submit' }, 'Enregistrer');
   box.append(h('form', { class: 'pf form', onsubmit: function (e) {
     e.preventDefault(); save.disabled = true;
-    var body = { name: ni.value.trim(), bio: bi.value.trim() }; if (newAvatar) body.avatar = newAvatar;
+    var body = { name: ni.value.trim(), bio: bi.value.trim() }; if (newAvatar) body.avatar = newAvatar; else if (dropAvatar) body.removeAvatar = true;
     attempt(call('PUT', '/api/profile', body), 'Profil enregistré').then(function (r) { save.disabled = false; if (r) { S.me = r.me; S.users[r.me.id] = r.me; S.editing = false; renderAll(); } });
   } },
     h('h1', { class: 'pf-name', text: 'Ton profil' }),
-    h('div', { class: 'pf-head' }, prevBox, h('label', { class: 'btn small', for: 'pf-file' }, icon('image'), 'Changer la photo'), fi),
+    h('div', { class: 'pf-head' }, prevBox, h('div', { style: 'display:flex;flex-direction:column;align-items:flex-start;gap:8px' }, h('label', { class: 'btn small', for: 'pf-file' }, icon('image'), 'Changer la photo'), rm), fi),
     h('div', { class: 'field' }, h('label', { for: 'pf-name', text: 'Nom affiché' }), ni),
     h('div', { class: 'field' }, h('label', { for: 'pf-bio', text: 'Bio' }), bi),
     h('div', { class: 'pf-acts' }, h('button', { class: 'btn', type: 'button', onclick: function () { S.editing = false; renderProfile(); } }, 'Annuler'), save)));
@@ -405,6 +683,8 @@ function closeSheet() { var sh = $('#sheet'); if (sh.hidden) return; sh.hidden =
 function renderSheetDyn() {
   if (!S.sheet) return;
   if (S.sheet.type === 'comments') renderComments();
+  if (S.sheet.type === 'settings') renderSettings();
+  if (S.sheet.type === 'plans') renderPlans();
   if (S.sheet.type === 'post') { var box = $('#sheet-post'); if (!box) return; var p = S.posts.find(function (x) { return x.id === S.sheet.id; }); box.replaceChildren(p ? postCard(p) : h('p', { text: 'Cette publication a été supprimée.' })); }
 }
 function openPost(id) { openSheet('Publication', h('div', { id: 'sheet-post' }), { type: 'post', id: id }); renderSheetDyn(); }
@@ -538,7 +818,11 @@ function buildStory() {
   var foot;
   if (mine) {
     var left = Math.max(1, Math.round((s.at + DAY - Date.now()) / 36e5));
-    foot = h('div', { class: 'sv-foot' }, h('span', { class: 'sv-note', text: 'Disparaît dans ' + left + ' h' }));
+    var cur = S.stories.find(function (x) { return x.id === s.id; }) || s, vs = cur.views || [];
+    // nombre de vues pour tout le monde, les noms avec Bulle+
+    var seenTxt = !vs.length ? 'Pas encore vu' : hasPlus() ? 'Vu par ' + vs.map(function (u) { return who(u).name; }).join(', ') : 'Vu par ' + vs.length + (vs.length > 1 ? ' personnes' : ' personne');
+    foot = h('div', { class: 'sv-foot' }, h('span', { class: 'sv-note' }, icon('eye'), ' ', seenTxt, ' · disparaît dans ' + left + ' h'),
+      vs.length && !hasPlus() ? h('button', { class: 'sv-ic', type: 'button', 'aria-label': 'Voir qui a regardé (Bulle+)', onclick: function () { closeStory(); openPlans('Voir qui a regardé tes snaps, c’est avec Bulle+.'); } }, h('span', { class: 'tier', text: '+' })) : null);
   } else {
     var liked = LS.get('storyLikes', []).indexOf(s.id) >= 0;
     var ri = h('input', { id: 'sv-reply', class: 'sv-reply', placeholder: 'Répondre à ' + (w.handle || w.name) + '…', maxlength: '500', autocomplete: 'off', 'aria-label': 'Réponse au snap', enterkeyhint: 'send' });
@@ -570,10 +854,134 @@ function prevStory() { if (SVs.si > 0) SVs.si--; else if (SVs.gi > 0) { SVs.gi--
 /* ---------------- onglets */
 function switchTab(t) {
   S.tab = t;
-  ['feed', 'chat', 'profile'].forEach(function (v) { $('#v-' + v).hidden = v !== t; });
+  ['feed', 'map', 'chat', 'profile'].forEach(function (v) { $('#v-' + v).hidden = v !== t; });
   if (t !== 'profile') S.editing = false;
+  $('#screen').classList.toggle('flush', t === 'map');
   renderNav(); if (t === 'profile') renderProfile();
+  if (t === 'map') showMap();
   $('#screen').scrollTop = 0;
+}
+
+/* ---------------- carte façon Snap Map (Leaflet + fonds de carte CARTO / OpenStreetMap) */
+var MAP = { map: null, tiles: null, layer: null, places: [], pos: null, loading: null, sel: null, intro: false };
+var LEAFLET = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/';
+function loadLeaflet() {
+  if (window.L) return Promise.resolve();
+  if (!MAP.loading) MAP.loading = new Promise(function (res, rej) {
+    document.head.append(h('link', { rel: 'stylesheet', href: LEAFLET + 'leaflet.css', crossorigin: '' }));
+    var s = h('script', { src: LEAFLET + 'leaflet.js', crossorigin: '' });
+    s.onload = res; s.onerror = function () { MAP.loading = null; s.remove(); rej(new Error('leaflet')); };
+    document.head.append(s);
+  });
+  return MAP.loading;
+}
+function showMap() {
+  var box = $('#map');
+  if (MAP.map) { MAP.map.invalidateSize(); locate(); return; }
+  box.replaceChildren(h('div', { class: 'map-wait' }, h('span', { class: 'logo xl' }), h('p', { text: 'Chargement de la carte…' })));
+  loadLeaflet().then(initMap, function () {
+    box.replaceChildren(h('div', { class: 'map-wait' }, h('h2', { class: 'pf-name', text: 'Carte indisponible' }), h('p', { text: 'La carte a besoin d’Internet. Reconnecte-toi puis réessaie.' }), h('button', { class: 'btn', type: 'button', onclick: showMap }, 'Réessayer')));
+  });
+}
+function initMap() {
+  var box = $('#map'), el = h('div', { class: 'map-canvas' });
+  box.replaceChildren(el, h('div', { class: 'map-ui', id: 'map-ui' }));
+  MAP.map = L.map(el, { zoomControl: false, center: [45.764, 4.8357], zoom: 13, minZoom: 3 });
+  MAP.map.attributionControl.setPrefix(false);
+  setTiles();
+  MAP.layer = L.layerGroup().addTo(MAP.map);
+  MAP.map.on('click', function () { if (MAP.sel) { MAP.sel = null; renderMapUI(); } });
+  renderMapUI();
+  locate();
+}
+// Fond de carte OpenStreetMap (gratuit, sans clé). Les couleurs du thème et le mode nuit sont appliqués en CSS.
+// Pour un vrai lancement avec beaucoup d'utilisateurs, il faudra un fournisseur de tuiles dédié (MapTiler, Stadia…).
+function setTiles() {
+  if (!window.L || !MAP.map || MAP.tiles) return;
+  MAP.tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">contributeurs OpenStreetMap</a>'
+  }).addTo(MAP.map);
+}
+// Position : demandée seulement après un choix clair (Activer / Mode fantôme)
+function locate(force) {
+  if (!MAP.map) return;
+  var pv = privacy();
+  if (!LS.get('mapAsked', false) && !force) { MAP.intro = true; renderMapUI(); refreshPlaces(); return; }
+  MAP.intro = false;
+  if (pv.ghost || !navigator.geolocation) { refreshPlaces(); return; }
+  navigator.geolocation.getCurrentPosition(function (p) {
+    var first = !MAP.pos; MAP.pos = [p.coords.latitude, p.coords.longitude];
+    refreshPlaces(); if (first || force) MAP.map.setView(MAP.pos, 14);
+  }, function () { toast('Position indisponible : autorise-la dans les réglages du navigateur.'); refreshPlaces(); }, { enableHighAccuracy: false, timeout: 12000, maximumAge: 120000 });
+}
+function refreshPlaces() {
+  if (!MAP.map) return;
+  var body = MAP.pos && !privacy().ghost ? { lat: MAP.pos[0], lng: MAP.pos[1] } : {};
+  call('POST', '/api/location', body).then(function (r) {
+    MAP.places = r.places || [];
+    if (!MAP.pos && r.base && !MAP.centered) { MAP.map.setView(r.base, 13); MAP.centered = true; }
+    drawPlaces(); renderMapUI();
+  }, function () { /* hors ligne : on garde l'affichage */ });
+}
+function km(a, b) { var R = 6371, r = Math.PI / 180, dLa = (b[0] - a[0]) * r, dLo = (b[1] - a[1]) * r; var x = Math.sin(dLa / 2) * Math.sin(dLa / 2) + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLo / 2) * Math.sin(dLo / 2); return 2 * R * Math.asin(Math.sqrt(x)); }
+function placeLine(p) {
+  var bits = [];
+  if (MAP.pos) { var d = km(MAP.pos, [p.lat, p.lng]); bits.push(d < 1 ? Math.round(d * 1000 / 50) * 50 + ' m' : d.toFixed(1).replace('.', ',') + ' km'); }
+  bits.push(ago(p.at) === 'à l’instant' ? 'à l’instant' : 'il y a ' + ago(p.at));
+  return bits.join(' · ');
+}
+function drawPlaces() {
+  if (!MAP.layer) return;
+  MAP.layer.clearLayers();
+  var gs = storyGroups(), ghost = privacy().ghost;
+  function marker(uid, ll, extra) {
+    var live = gs.some(function (g) { return g.uid === uid && g.unseen && uid !== S.me.id; });
+    var el = h('div', { class: 'mk' + extra }, h('span', { class: 'mk-ring' + (live ? ' live' : '') }, avatar(uid, 46)), h('span', { class: 'mk-name', text: uid === S.me.id ? (ghost ? 'Toi · fantôme' : 'Toi') : who(uid).name }));
+    var mk = L.marker(ll, { icon: L.divIcon({ html: el, className: 'mk-wrap', iconSize: [70, 80], iconAnchor: [35, 56] }), riseOnHover: true, title: who(uid).name, alt: who(uid).name });
+    mk.on('click', function (e) { L.DomEvent.stopPropagation(e); MAP.sel = uid === S.me.id ? null : uid; renderMapUI(); });
+    MAP.layer.addLayer(mk);
+  }
+  MAP.places.forEach(function (p) { marker(p.uid, [p.lat, p.lng], ''); });
+  if (MAP.pos) marker(S.me.id, MAP.pos, ' me' + (ghost ? ' ghost' : ''));
+}
+function renderMapUI() {
+  var ui = $('#map-ui'); if (!ui) return; ui.replaceChildren();
+  var ghost = privacy().ghost;
+  ui.append(h('div', { class: 'map-top' }, h('span', { class: 'map-title', text: 'Carte' }),
+    h('div', { class: 'map-btns' },
+      h('button', { class: 'map-btn', type: 'button', 'aria-pressed': String(ghost), 'aria-label': ghost ? 'Désactiver le mode fantôme' : 'Activer le mode fantôme', onclick: function () {
+        setPrivacy({ ghost: !ghost }).then(function (r) {
+          if (!r) return;
+          toast(!ghost ? 'Mode fantôme activé : tes amis ne te voient plus' : 'Tes amis voient de nouveau ta position');
+          if (ghost) { LS.set('mapAsked', true); locate(true); } // on vient de sortir du mode fantôme
+          renderMapUI(); drawPlaces();
+        });
+      } }, icon('ghost')),
+      h('button', { class: 'map-btn', type: 'button', 'aria-label': 'Me localiser', onclick: function () { LS.set('mapAsked', true); if (MAP.pos) MAP.map.setView(MAP.pos, 15); locate(true); } }, icon('locate')))));
+  var bottom = h('div', { class: 'map-bottom' }); ui.append(bottom);
+  if (MAP.intro) {
+    bottom.append(h('div', { class: 'map-card' }, h('div', { class: 'who' }, h('span', { class: 'nm' }, h('b', { text: 'Retrouve tes amis' }), h('small', { text: 'Ta position n’est visible que par tes amis, et tu peux te cacher quand tu veux.' }))),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn', type: 'button', onclick: function () { LS.set('mapAsked', true); MAP.intro = false; setPrivacy({ ghost: true }).then(function () { renderMapUI(); }); } }, icon('ghost'), 'Mode fantôme'),
+        h('button', { class: 'btn primary', type: 'button', onclick: function () { LS.set('mapAsked', true); MAP.intro = false; (privacy().ghost ? setPrivacy({ ghost: false }) : Promise.resolve()).then(function () { locate(true); renderMapUI(); }); } }, icon('locate'), 'Partager'))));
+    return;
+  }
+  if (MAP.sel) {
+    var uid = MAP.sel, p = MAP.places.find(function (x) { return x.uid === uid; });
+    var g = storyGroups(), gi = g.findIndex(function (x) { return x.uid === uid; });
+    bottom.append(h('div', { class: 'map-card' },
+      h('div', { class: 'who' }, avatar(uid, 52), h('span', { class: 'nm' }, h('b', { text: who(uid).name }), h('small', { text: p ? placeLine(p) : '' }))),
+      h('div', { class: 'row' },
+        gi >= 0 ? h('button', { class: 'btn', type: 'button', onclick: function () { openStories(g, gi); } }, 'Ses snaps') : h('button', { class: 'btn', type: 'button', onclick: function () { showProfile(uid); } }, 'Profil'),
+        h('button', { class: 'btn primary', type: 'button', onclick: function () { switchTab('chat'); openChat(dmFor(uid)); } }, icon('send'), 'Message'))));
+    return;
+  }
+  if (MAP.places.length) {
+    bottom.append(h('div', { class: 'map-people' }, MAP.places.map(function (p) {
+      return h('button', { class: 'chip', type: 'button', onclick: function () { MAP.sel = p.uid; MAP.map.flyTo([p.lat, p.lng], 15, { duration: 0.6 }); renderMapUI(); } }, avatar(p.uid, 34), h('span', { class: 'nm' }, h('b', { text: who(p.uid).name }), h('small', { text: placeLine(p) })));
+    })));
+  }
 }
 $$('[data-tab]').forEach(function (el) { el.addEventListener('click', function () { var t = el.getAttribute('data-tab'); if (t === 'profile') S.viewUid = null; if (S.openChat) closeThread(); switchTab(t); }); });
 $$('[data-create]').forEach(function (el) { el.addEventListener('click', function () { openComposer('post'); }); });
@@ -609,47 +1017,58 @@ function connectEvents() {
   es = window.BulleLocal.subscribe(function (type, d) { if (handlers[type]) handlers[type](d); });
   function on(type, fn) { handlers[type] = fn; }
   on('storage-error', function () { toast('Espace de stockage plein : supprime quelques photos.'); });
-  on('user', function (u) { S.users[u.id] = u; if (u.id === S.me.id) S.me = u; renderAll(); });
+  on('user', function (u) { S.users[u.id] = u; if (u.id === S.me.id) { S.me = u; applyLook(); } renderAll(); });
   on('post', function (p) { upsert(S.posts, p, byNewest); renderFeed(); renderSheetDyn(); if (S.tab === 'profile') renderProfile(); });
   on('post-del', function (d) { removePost(d.id); });
   on('story', function (s) { upsert(S.stories, s, byOldest); if (!SVs) renderFeed(); });
   on('story-del', function (d) { S.stories = S.stories.filter(function (x) { return x.id !== d.id; }); if (!SVs) renderFeed(); });
-  on('chat', function (c) { upsert(S.chats, c); if (S.openChat && S.openChat.id === c.id) { S.openChat = c; markRead(c.id); } renderChatList(); renderNav(); });
+  on('chat', function (c) { upsert(S.chats, c); if (S.openChat && S.openChat.id === c.id) { S.openChat = c; markRead(c.id); renderMsgs(); } renderChatList(); renderNav(); });
   on('presence', function (d) { S.online = new Set(d.online || []); renderLight(); });
   on('typing', function (d) { var t = S.typing[d.chatId] = S.typing[d.chatId] || {}; t[d.by] = Date.now() + 4000; renderLight(); setTimeout(renderLight, 4100); });
   on('msg', function (d) {
     var m = d.msg; if (S.typing[d.chatId]) delete S.typing[d.chatId][m.by];
     var open = S.openChat && S.openChat.id === d.chatId;
     if (open && !S.msgs.some(function (x) { return x.id === m.id; })) { S.msgs.push(m); renderMsgs(); renderTyping(); }
-    if (m.by !== S.me.id && (document.hidden || !open)) notify(d.chatId, m);
+    if (m.by !== S.me.id && document.hidden) notify(d.chatId, m);
+    else if (m.by !== S.me.id && !open) headsUp(d.chatId, m);
   });
 }
+function msgTitle(chatId, m) { var c = S.chats.find(function (x) { return x.id === chatId; }); return c && c.kind === 'group' ? 'Le salon · ' + who(m.by).name : who(m.by).name; }
 function notify(chatId, m) {
-  if (!('Notification' in window) || Notification.permission !== 'granted' || !swReg) return;
-  var c = S.chats.find(function (x) { return x.id === chatId; });
-  var title = c && c.kind === 'group' ? 'Le salon · ' + who(m.by).name : who(m.by).name;
-  swReg.showNotification(title, { body: m.text || 'Photo', icon: 'icons/icon-192.png', badge: 'icons/favicon-32.png', tag: chatId, renotify: true, data: { chatId: chatId } }).catch(function () {});
+  if (!PREFS.notif || !('Notification' in window) || Notification.permission !== 'granted' || !swReg) return;
+  swReg.showNotification(msgTitle(chatId, m), { body: PREFS.preview ? (m.text || '📷 Photo') : 'Nouveau message', icon: 'icons/icon-192.png', badge: 'icons/favicon-32.png', tag: chatId, renotify: true, data: { chatId: chatId } }).catch(function () {});
+}
+// bandeau en haut de l'écran quand l'app est ouverte sur autre chose
+var huT = null;
+function headsUp(chatId, m) {
+  if (!PREFS.heads) return;
+  var el = $('#hu'), c = visibleChats().find(function (x) { return x.id === chatId; });
+  el.replaceChildren(h('button', { class: 'hu-in', type: 'button', onclick: function () { el.hidden = true; if (!c) return; if (SVs) closeStory(); closeSheet(); switchTab('chat'); openChat(c); } },
+    avatar(m.by, 40), h('span', { class: 't' }, h('b', { text: msgTitle(chatId, m) }), h('span', { text: PREFS.preview ? (m.text || '📷 Photo') : 'Nouveau message' }))));
+  el.hidden = false; clearTimeout(huT); huT = setTimeout(function () { el.hidden = true; }, 4500);
+  if (navigator.vibrate) navigator.vibrate(18);
 }
 
 /* ================================================================ connexion */
 $('#a-handle').addEventListener('input', function () { var v = this.value.toLowerCase().replace(/[^a-z0-9._]/g, ''); if (v !== this.value) this.value = v; });
 $('#auth-form').addEventListener('submit', function (e) {
   e.preventDefault(); var go = $('#auth-go'), err = $('#auth-err'); go.disabled = true; err.hidden = true;
-  call('POST', '/api/register', { handle: $('#a-handle').value.trim(), name: $('#a-name').value.trim() })
+  call('POST', '/api/register', { handle: $('#a-handle').value.trim(), name: $('#a-name').value.trim(), terms: $('#a-ok').checked })
     .then(function () { return start().then(function () { toast('Bienvenue sur Bulle !'); }); }, function (e2) { err.textContent = e2.message; err.hidden = false; })
     .then(function () { go.disabled = false; });
 });
+$$('[data-legal]').forEach(function (a) { a.addEventListener('click', function (e) { e.preventDefault(); openLegal(a.getAttribute('href'), a.textContent.charAt(0).toUpperCase() + a.textContent.slice(1)); }); });
 function showAuth() { if (es) { es(); es = null; } $('#splash').hidden = true; $('#shell').hidden = true; $('#auth').hidden = false; closeSheet(); closeStory(); $('#a-handle').focus(); }
 function showSplash(msg, retry) { $('#splash-msg').textContent = msg || ''; $('#splash-retry').hidden = !retry; $('#splash').hidden = false; }
 $('#splash-retry').addEventListener('click', function () { showSplash('Connexion…'); start(); });
 
 function start() {
   return call('GET', '/api/state').then(function (st) {
-    applyState(st);
+    applyState(st); applyLook();
     $('#auth').hidden = true; $('#splash').hidden = true; $('#shell').hidden = false;
     renderAll(); connectEvents();
-    var q = new URLSearchParams(location.search);
-    if (q.get('tab')) switchTab(q.get('tab') === 'chat' ? 'chat' : q.get('tab') === 'profile' ? 'profile' : 'feed');
+    var q = new URLSearchParams(location.search), tabs = ['feed', 'map', 'chat', 'profile'];
+    if (q.get('tab')) switchTab(tabs.indexOf(q.get('tab')) >= 0 ? q.get('tab') : 'feed');
     if (q.get('create')) openComposer(q.get('create') === 'snap' ? 'snap' : 'post');
     var cid = q.get('chat'); if (cid) { var c = visibleChats().find(function (x) { return x.id === cid; }); if (c) { switchTab('chat'); openChat(c); } }
     if (location.search) history.replaceState(null, '', location.pathname);

@@ -1,54 +1,60 @@
 BULLE — VERSION TEST (sans serveur)
 ===================================
 
+ADRESSE EN LIGNE : https://rking926.github.io/bulle/
+
 Cette version n'a besoin d'aucun serveur ni d'aucun certificat.
-Tout est enregistré sur l'appareil lui-même : profil, photos, snaps, messages.
+Tout est enregistré sur l'appareil lui-même : profil, photos, snaps, messages, position.
 Lou, Inès et Malo sont des contacts d'exemple : ils répondent à tes messages,
-likent et commentent tes photos, pour tester l'app comme si tu avais des amis dessus.
+likent et commentent tes photos, regardent tes snaps et apparaissent sur la carte.
 
 Limite : deux appareils ne se voient pas entre eux (ton PC et ton téléphone ont
 chacun leurs propres données). Ça arrivera avec le serveur, plus tard.
 
 
-ESSAYER TOUT DE SUITE SUR LE PC
--------------------------------
-Double-clique sur index.html : l'app s'ouvre dans ton navigateur et marche entièrement.
-(Ouverte comme ça, elle ne peut pas s'installer : voir ci-dessous.)
+INSTALLER L'APP
+---------------
+- Sur le PC (Chrome ou Edge) : ouvre l'adresse ci-dessus → icône d'installation
+  dans la barre d'adresse (un écran avec une flèche), ou menu ⋯ → Applications → Installer.
+- Sur Android (Chrome) : ouvre l'adresse → menu ⋮ → « Installer l'application ».
+- Sur iPhone (Safari) : ouvre l'adresse → Partager → « Sur l'écran d'accueil ».
 
 
-L'INSTALLER SUR LE PC ET LE TÉLÉPHONE (gratuit)
-------------------------------------------------
-Pour s'installer comme une vraie application, l'app doit être ouverte depuis
-une adresse en https://. Un hébergeur gratuit de « site statique » suffit :
-il ne fait que stocker ces fichiers, ce n'est pas un serveur à payer.
-
-Exemple avec Netlify (gratuit) :
-1. Va sur https://app.netlify.com/drop
-2. Crée un compte gratuit.
-3. Glisse le dossier « app-test » entier dans la page.
-4. Netlify te donne une adresse du type https://quelque-chose.netlify.app
-
-Ensuite :
-- Sur le PC (Chrome ou Edge) : ouvre l'adresse → icône d'installation dans la
-  barre d'adresse, ou menu → Applications → Installer.
-- Sur le téléphone Android (Chrome) : ouvre l'adresse → menu ⋮ → Installer l'application.
-- Sur iPhone (Safari) : ouvre l'adresse → Partager → Sur l'écran d'accueil.
-
-Ce qui est envoyé à l'hébergeur : seulement les fichiers de l'app (code, styles, icônes).
-Tes photos et tes messages restent sur chaque appareil, jamais sur Internet.
+CE QU'IL Y A DANS L'APP
+-----------------------
+- Fil de photos, snaps 24 h (façon Instagram), messages privés et salon commun
+- Carte façon Snap Map (position partagée seulement si tu le choisis, mode fantôme)
+- Paramètres : mode Jour / Nuit / Auto, 6 thèmes de couleur, notifications,
+  confidentialité, conditions d'utilisation, politique de confidentialité,
+  téléchargement de tes données, tout effacer
+- Recadrage de la photo de profil
+- « Vu » sous tes messages privés, bandeau quand un message arrive
+- Bulle+ et Bulle Pro (gratuits en version test) : entrouvrir un message sans
+  le marquer comme lu, thèmes exclusifs, voir qui a regardé tes snaps, statistiques
 
 
-METTRE À JOUR L'APP
--------------------
-Après une modification, glisse de nouveau le dossier dans Netlify (onglet « Deploys »).
-Les appareils récupèrent la nouvelle version à la réouverture suivante de l'app.
+METTRE À JOUR LA VERSION EN LIGNE
+---------------------------------
+Le dossier « en-ligne » (à côté) est la copie publiée sur GitHub (dépôt Rking926/bulle).
+Claude s'occupe de la mise à jour. Les appareils récupèrent la nouvelle version
+à la réouverture suivante de l'app.
+
+
+À COMPLÉTER AVANT UN VRAI LANCEMENT
+-----------------------------------
+Dans cgu.html et confidentialite.html, les passages en rose [entre crochets]
+(nom de l'éditeur, e-mail de contact et de signalement). Ces pages sont des
+modèles : à faire relire par un juriste avant d'ouvrir l'app au public.
 
 
 CONTENU
 -------
 index.html            la page de l'app
-app.js / app.css      l'application (identique à la future version avec serveur)
+app.js / app.css      l'application
 local-api.js          le « faux serveur » qui enregistre tout sur l'appareil
 sw.js                 service worker : installation et mode hors ligne
 manifest.webmanifest  nom, couleurs et icônes de l'app installée
+cgu.html              conditions d'utilisation
+confidentialite.html  politique de confidentialité
+legal.css             style de ces deux pages
 icons\                icônes faites à partir de ton logo

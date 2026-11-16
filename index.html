@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
 <title>Bulle</title>
 <meta name="description" content="Photos, snaps et messages entre amis.">
-<meta name="theme-color" content="#F6B6C8" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#110B0D" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F6B6C8">
+<script>/* thème et mode jour/nuit choisis dans les réglages, appliqués avant l'affichage */
+try{var p=JSON.parse(localStorage.getItem('bulle.prefs')||'{}'),m=p.mode||'auto',d=document.documentElement;d.setAttribute('data-theme',p.theme||'bulle');d.setAttribute('data-scheme',m==='auto'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):m)}catch(e){document.documentElement.setAttribute('data-scheme','light')}</script>
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Bulle">
@@ -33,6 +34,7 @@
       <form class="form" id="auth-form" autocomplete="off">
         <div class="field"><label for="a-handle">Pseudo</label><input id="a-handle" name="handle" autocapitalize="none" spellcheck="false" maxlength="24" placeholder="ton.pseudo" required></div>
         <div class="field"><label for="a-name">Nom affiché</label><input id="a-name" name="name" maxlength="40" placeholder="Facultatif"></div>
+        <label class="check"><input type="checkbox" id="a-ok" required><span>J’ai au moins 13 ans et j’accepte les <a href="cgu.html" data-legal>conditions d’utilisation</a> et la <a href="confidentialite.html" data-legal>politique de confidentialité</a>.</span></label>
         <p class="err" id="auth-err" role="alert" hidden></p>
         <button class="btn primary" type="submit" id="auth-go">C’est parti</button>
         <p class="hint" style="text-align:center">Version test : tout reste sur cet appareil.</p>
@@ -62,12 +64,14 @@
         <div class="cl-head"><h2>Messages</h2><button class="iconbtn" type="button" id="newchat" aria-label="Nouveau message"><span class="ico" data-ico="edit"></span></button></div>
         <div class="chatlist" id="chatlist"></div>
       </section>
+      <section id="v-map" class="view" aria-label="Carte" hidden><div id="map" class="map"></div></section>
       <section id="v-profile" class="view" aria-label="Profil" hidden><div id="profile"></div></section>
     </main>
     <nav class="tabs" aria-label="Navigation">
       <button class="tab" data-tab="feed" type="button"><span class="ico" data-ico="home"></span>Fil</button>
-      <button class="tab" data-tab="chat" type="button"><span class="ico" data-ico="chat"></span>Messages<span class="badge" data-badge hidden></span></button>
+      <button class="tab" data-tab="map" type="button"><span class="ico" data-ico="map"></span>Carte</button>
       <button class="fab" type="button" data-create aria-label="Créer"><span class="ico" data-ico="plus"></span></button>
+      <button class="tab" data-tab="chat" type="button"><span class="ico" data-ico="chat"></span>Messages<span class="badge" data-badge hidden></span></button>
       <button class="tab" data-tab="profile" type="button"><span class="ico" data-ico="user"></span>Profil</button>
     </nav>
 
@@ -90,6 +94,7 @@
 
   <div id="sheet" class="sheet" hidden></div>
   <div id="story" class="story" hidden></div>
+  <div id="hu" class="hu" role="status" hidden></div>
   <div id="toast" class="toast" role="status" hidden></div>
 </div>
 </body>

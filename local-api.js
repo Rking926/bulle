@@ -48,11 +48,18 @@ function save() {
 function emit(type, data) { listeners.forEach(function (fn) { try { fn(type, data); } catch (e) { console.warn(e); } }); }
 
 /* ---------- formes publiques (identiques au futur serveur) ---------- */
-function pubUser(u) { return { id: u.id, handle: u.handle, name: u.name || u.handle, bio: u.bio || '', avatar: u.avatar || '', admin: u.id === db.me, bot: !!u.bot }; }
+var PRIVACY = { showOnline: true, readReceipts: true, ghost: false, dms: 'all' };
+function privacyOf(u) { var p = u.privacy || {}, o = {}; Object.keys(PRIVACY).forEach(function (k) { o[k] = p[k] == null ? PRIVACY[k] : p[k]; }); return o; }
+function pubUser(u) {
+  var o = { id: u.id, handle: u.handle, name: u.name || u.handle, bio: u.bio || '', avatar: u.avatar || '', admin: u.id === db.me, bot: !!u.bot, plan: u.plan || 'free' };
+  if (u.id === db.me) o.privacy = privacyOf(u); // réglages privés : seulement pour soi
+  return o;
+}
 function outPost(p) { return { id: p.id, by: p.by, caption: p.caption, at: p.at, img: p.image, likes: Object.keys(p.likes || {}), comments: p.comments || [] }; }
-function outStory(s) { return { id: s.id, by: s.by, text: s.text, at: s.at, img: s.image }; }
+// les vues d'un snap ne sont renvoyées qu'à son auteur
+function outStory(s) { return { id: s.id, by: s.by, text: s.text, at: s.at, img: s.image, views: s.by === db.me ? Object.keys(s.views || {}) : [] }; }
 function outMsg(m) { return { id: m.id, by: m.by, at: m.at, text: m.text || '', img: m.image || '', reply: m.reply || null }; }
-function outChat(c) { return { id: c.id, kind: c.kind, members: c.members, lastAt: c.lastAt, lastText: c.lastText, lastBy: c.lastBy }; }
+function outChat(c) { return { id: c.id, kind: c.kind, members: c.members, lastAt: c.lastAt, lastText: c.lastText, lastBy: c.lastBy, seen: c.seen || {} }; }
 function image(v) { if (typeof v !== 'string' || !/^data:image\/(jpeg|png|webp);base64,/.test(v)) throw fail(400, 'Image invalide.'); return v; }
 function me() { var u = db.me && db.users[db.me]; if (!u) throw fail(401, 'Crée ton profil pour commencer.'); return u; }
 function bots() { return Object.values(db.users).filter(function (u) { return u.bot; }); }
@@ -102,6 +109,8 @@ var pick = function (a) { return a[Math.floor(Math.random() * a.length)]; };
 function botReply(c) {
   var b = c.kind === 'dm' ? db.users[c.members.find(function (m) { return m !== db.me; })] : pick(bots().filter(function (u) { return u.handle !== 'ines_b'; }));
   if (!b || !b.bot) return;
+  // en privé, le contact « ouvre » le message avant de répondre (affiche « Vu »)
+  if (c.kind === 'dm') setTimeout(function () { var cur = db.chats[c.id]; if (!cur) return; cur.seen = cur.seen || {}; cur.seen[b.id] = Date.now(); save(); emit('chat', outChat(cur)); }, 500);
   setTimeout(function () { emit('typing', { chatId: c.id, by: b.id }); }, 700);
   setTimeout(function () {
     var m = { id: rid(12), by: b.id, at: Date.now(), text: pick(LINES) };
@@ -138,7 +147,8 @@ function register(b) {
   if (db.me && db.users[db.me]) return { me: pubUser(db.users[db.me]) };
   var handle = str(b.handle, 40).toLowerCase();
   if (!/^[a-z0-9._]{3,24}$/.test(handle)) throw fail(400, 'Pseudo : 3 à 24 caractères, lettres minuscules, chiffres, point ou tiret bas.');
-  var u = { id: rid(12), handle: handle, name: str(b.name, 40) || handle, bio: '', avatar: '', createdAt: Date.now() };
+  if (b.terms !== true) throw fail(400, 'Coche la case pour accepter les conditions.');
+  var u = { id: rid(12), handle: handle, name: str(b.name, 40) || handle, bio: '', avatar: '', createdAt: Date.now(), terms: { version: '2026-11', at: Date.now() } };
   db.users[u.id] = u; db.me = u.id; seed(u.id); save();
   return { me: pubUser(u) };
 }
@@ -163,7 +173,47 @@ route('PUT', '/api/profile', function (b) {
   if (typeof b.bio === 'string') u.bio = str(b.bio, 150);
   if (b.avatar) u.avatar = image(b.avatar);
   if (b.removeAvatar) u.avatar = '';
+  if (b.privacy && typeof b.privacy === 'object') {
+    var cur = privacyOf(u);
+    ['showOnline', 'readReceipts', 'ghost'].forEach(function (k) { if (typeof b.privacy[k] === 'boolean') cur[k] = b.privacy[k]; });
+    if (b.privacy.dms === 'all' || b.privacy.dms === 'friends') cur.dms = b.privacy.dms;
+    u.privacy = cur;
+    if (cur.ghost && db.places) delete db.places[u.id];
+  }
+  // Version test : l'offre change sans paiement. Avec le serveur, seul le paiement confirmé pourra la changer.
+  if (b.plan === 'free' || b.plan === 'plus' || b.plan === 'pro') u.plan = b.plan;
   save(); emit('user', pubUser(u)); return { me: pubUser(u) };
+});
+route('GET', '/api/export', function () {
+  var u = me();
+  return {
+    exportedAt: new Date().toISOString(), note: 'Toutes les données de ton compte Bulle (version test, enregistrées sur cet appareil).',
+    profile: pubUser(u), acceptedTerms: u.terms || null,
+    posts: Object.values(db.posts).filter(function (p) { return p.by === u.id; }).map(outPost),
+    stories: Object.values(db.stories).filter(function (s) { return s.by === u.id; }).map(outStory),
+    chats: Object.values(db.chats).filter(function (c) { return canSee(c, u.id); }).map(function (c) { return { chat: outChat(c), messages: (db.msgs[c.id] || []).map(outMsg) }; }),
+    location: (db.places && db.places[u.id]) || null
+  };
+});
+// Carte : enregistre ta position (sauf en mode fantôme) et renvoie celle de tes amis
+function km(a, b) { var R = 6371, r = Math.PI / 180, dLa = (b[0] - a[0]) * r, dLo = (b[1] - a[1]) * r; var x = Math.sin(dLa / 2) * Math.sin(dLa / 2) + Math.cos(a[0] * r) * Math.cos(b[0] * r) * Math.sin(dLo / 2) * Math.sin(dLo / 2); return 2 * R * Math.asin(Math.sqrt(x)); }
+route('POST', '/api/location', function (b) {
+  var u = me(), now = Date.now(), pv = privacyOf(u);
+  var has = typeof b.lat === 'number' && typeof b.lng === 'number' && Math.abs(b.lat) <= 90 && Math.abs(b.lng) <= 180;
+  db.places = db.places || {};
+  if (pv.ghost) delete db.places[u.id]; else if (has) db.places[u.id] = { lat: b.lat, lng: b.lng, at: now };
+  var base = has ? [b.lat, b.lng] : (db.mapBase || [45.764, 4.8357]); // Lyon par défaut
+  var moved = !db.mapBase || km(db.mapBase, base) > 30;
+  if (moved) db.mapBase = base;
+  bots().forEach(function (bt) {
+    var p = db.places[bt.id];
+    if (!p || moved || now - p.at > 25 * 6e4) {
+      var a = Math.random() * Math.PI * 2, d = 0.4 + Math.random() * 2.6;
+      db.places[bt.id] = { lat: base[0] + d / 111 * Math.cos(a), lng: base[1] + d / (111 * Math.cos(base[0] * Math.PI / 180)) * Math.sin(a), at: now - Math.floor(Math.random() * 40) * 6e4 };
+    }
+  });
+  save();
+  return { base: db.mapBase, places: Object.keys(db.places).filter(function (id) { return db.users[id] && id !== u.id; }).map(function (id) { var p = db.places[id]; return { uid: id, lat: p.lat, lng: p.lng, at: p.at }; }) };
 });
 route('POST', '/api/posts', function (b) {
   var u = me(); var p = { id: rid(12), by: u.id, caption: str(b.caption, 2200), image: image(b.image), at: Date.now(), likes: {}, comments: [] };
@@ -182,8 +232,14 @@ route('DELETE', '/api/posts/([0-9a-f]{12})/comments/([0-9a-f]{10})', function (b
 });
 route('DELETE', '/api/posts/([0-9a-f]{12})', function (b, id) { me(); getPost(id); delete db.posts[id]; save(); return { ok: true }; });
 route('POST', '/api/stories', function (b) {
-  var u = me(); var s = { id: rid(12), by: u.id, text: str(b.text, 80), image: image(b.image), at: Date.now() };
-  db.stories[s.id] = s; save(); return { story: outStory(s) };
+  var u = me(); var s = { id: rid(12), by: u.id, text: str(b.text, 80), image: image(b.image), at: Date.now(), views: {} };
+  db.stories[s.id] = s; save();
+  // les contacts d'exemple regardent ton snap au bout de quelques secondes
+  bots().forEach(function (bt, i) {
+    if (Math.random() < 0.2) return;
+    setTimeout(function () { var x = db.stories[s.id]; if (!x) return; x.views = x.views || {}; x.views[bt.id] = Date.now(); save(); emit('story', outStory(x)); }, 3000 + i * 4000 + Math.random() * 2500);
+  });
+  return { story: outStory(s) };
 });
 route('DELETE', '/api/stories/([0-9a-f]{12})', function (b, id) { me(); delete db.stories[id]; save(); return { ok: true }; });
 route('GET', '/api/chats/' + CHAT + '/messages', function (b, cid) {

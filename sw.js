@@ -1,8 +1,8 @@
 /* Bulle (version test) — service worker : rend l'app installable et la fait marcher hors ligne.
    Chemins relatifs : marche à la racine d'un site comme dans un sous-dossier. */
-const VERSION = 'bulle-test-v2';
+const VERSION = 'bulle-test-v3';
 const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'local-api.js', 'manifest.webmanifest',
-  'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png', 'icons/logo-mask.png'];
+  'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png', 'icons/logo-mask.png', 'cgu.html', 'confidentialite.html', 'legal.css'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -21,8 +21,10 @@ self.addEventListener('fetch', (e) => {
   }
   if (url.origin !== location.origin) return;
   if (req.mode === 'navigate') {
-    e.respondWith(fetch(req).then((r) => { const copy = r.clone(); caches.open(VERSION).then((c) => c.put('index.html', copy)); return r; })
-      .catch(() => caches.match('index.html')));
+    // chaque page est gardée sous sa propre adresse (l'app, les CGU…), sans les paramètres
+    const key = new URL(req.url); key.search = '';
+    e.respondWith(fetch(req).then((r) => { if (r.ok) { const copy = r.clone(); caches.open(VERSION).then((c) => c.put(key.href, copy)); } return r; })
+      .catch(() => caches.match(key.href).then((hit) => hit || caches.match('index.html'))));
     return;
   }
   e.respondWith(caches.open(VERSION).then((c) => c.match(req, { ignoreSearch: true }).then((hit) => {

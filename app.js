@@ -374,7 +374,10 @@ function openMomentCam() {
     stop();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return Promise.reject(new Error('no-cam'));
     // si la caméra demandée n'existe pas (ordinateur), on prend celle qui est disponible
-    return navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1440 }, height: { ideal: 1920 } }, audio: false }).catch(function () { return navigator.mediaDevices.getUserMedia({ video: true, audio: false }); }).then(function (s) {
+    var ask = function () { return navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1440 }, height: { ideal: 1920 } }, audio: false }).catch(function () { return navigator.mediaDevices.getUserMedia({ video: true, audio: false }); }); };
+    var wait = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+    // petite pause : certaines caméras mettent un instant à se libérer avant de rebasculer
+    return wait(facing === 'user' ? 300 : 0).then(ask).catch(function () { return wait(700).then(ask); }).then(function (s) {
       st.stream = s; video.srcObject = s; video.classList.toggle('mirror', facing === 'user');
       return video.play().catch(function () {});
     });

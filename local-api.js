@@ -51,15 +51,46 @@ function emit(type, data) { listeners.forEach(function (fn) { try { fn(type, dat
 var PRIVACY = { showOnline: true, readReceipts: true, ghost: false, dms: 'all' };
 function privacyOf(u) { var p = u.privacy || {}, o = {}; Object.keys(PRIVACY).forEach(function (k) { o[k] = p[k] == null ? PRIVACY[k] : p[k]; }); return o; }
 function pubUser(u) {
-  var o = { id: u.id, handle: u.handle, name: u.name || u.handle, bio: u.bio || '', avatar: u.avatar || '', admin: u.id === db.me, bot: !!u.bot, plan: u.plan || 'free' };
+  var o = { id: u.id, handle: u.handle, name: u.name || u.handle, bio: u.bio || '', avatar: u.avatar || '', admin: u.id === db.me, bot: !!u.bot, plan: u.plan || 'free', score: u.score || 0 };
   if (u.id === db.me) o.privacy = privacyOf(u); // réglages privés : seulement pour soi
   return o;
 }
 function outPost(p) { return { id: p.id, by: p.by, caption: p.caption, at: p.at, img: p.image, likes: Object.keys(p.likes || {}), comments: p.comments || [] }; }
 // les vues d'un snap ne sont renvoyées qu'à son auteur
 function outStory(s) { return { id: s.id, by: s.by, text: s.text, at: s.at, img: s.image, views: s.by === db.me ? Object.keys(s.views || {}) : [] }; }
-function outMsg(m) { return { id: m.id, by: m.by, at: m.at, text: m.text || '', img: m.image || '', reply: m.reply || null }; }
-function outChat(c) { return { id: c.id, kind: c.kind, members: c.members, lastAt: c.lastAt, lastText: c.lastText, lastBy: c.lastBy, seen: c.seen || {} }; }
+// un snap « vu une fois » n'envoie jamais son image dans la liste : il faut l'ouvrir (une seule fois)
+function outMsg(m) {
+  var o = { id: m.id, by: m.by, at: m.at, text: m.text || '', img: m.once ? '' : (m.image || ''), reply: m.reply || null, ref: m.ref || '', quote: m.quote || null, reacts: m.reacts || {} };
+  if (m.once) { o.once = true; o.opened = !!m.openedAt; }
+  return o;
+}
+// Flammes : nombre de jours d'affilée où les deux personnes se sont écrit
+function dayKey(t) { var d = new Date(t); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
+function markDay(c, uid, at) {
+  if (c.kind !== 'dm') return;
+  c.days = c.days || {}; var k = dayKey(at); (c.days[k] = c.days[k] || {})[uid] = true;
+  var ks = Object.keys(c.days); if (ks.length > 400) ks.slice(0, ks.length - 400).forEach(function (x) { delete c.days[x]; });
+}
+function streakOf(c) {
+  if (c.kind !== 'dm' || !c.days) return { n: 0, risk: false };
+  var both = function (d) { var x = c.days[dayKey(d)]; return !!(x && c.members.every(function (u) { return x[u]; })); };
+  var cur = new Date(); cur.setHours(12, 0, 0, 0);
+  var today = both(cur), n = 0;
+  if (!today) cur.setDate(cur.getDate() - 1);
+  while (both(cur)) { n++; cur.setDate(cur.getDate() - 1); }
+  var end = new Date(); end.setHours(24, 0, 0, 0);
+  return { n: n, risk: n > 0 && !today && end - Date.now() < 4 * 36e5 };
+}
+function outChat(c) { var s = streakOf(c); return { id: c.id, kind: c.kind, members: c.members, lastAt: c.lastAt, lastText: c.lastText, lastBy: c.lastBy, seen: c.seen || {}, streak: s.n, streakRisk: s.risk }; }
+function addScore(uid, n) { var u = db.users[uid]; if (!u) return; u.score = (u.score || 0) + n; emit('score', { uid: uid, score: u.score }); }
+// Activité : j'aime, commentaires, vues de snaps sur ce que tu publies
+function pushAct(type, by, extra) {
+  db.activity = db.activity || [];
+  var a = Object.assign({ id: rid(10), type: type, by: by, at: Date.now() }, extra || {});
+  db.activity.push(a); while (db.activity.length > 100) db.activity.shift();
+  emit('activity', a);
+}
+function liveNotes() { var cut = Date.now() - DAY; return Object.values(db.notes || {}).filter(function (n) { return n.at > cut && db.users[n.by]; }); }
 function image(v) { if (typeof v !== 'string' || !/^data:image\/(jpeg|png|webp);base64,/.test(v)) throw fail(400, 'Image invalide.'); return v; }
 function me() { var u = db.me && db.users[db.me]; if (!u) throw fail(401, 'Crée ton profil pour commencer.'); return u; }
 function bots() { return Object.values(db.users).filter(function (u) { return u.bot; }); }
@@ -81,7 +112,7 @@ function art(seed, bg, fg, ac, w, h) {
 }
 function seed(meId) {
   var now = Date.now(), M = 6e4, H = 36e5;
-  var mk = function (handle, name, bio) { var u = { id: rid(12), handle: handle, name: name, bio: bio, avatar: '', bot: true, createdAt: now }; db.users[u.id] = u; return u.id; };
+  var mk = function (handle, name, bio) { var u = { id: rid(12), handle: handle, name: name, bio: bio, avatar: '', bot: true, createdAt: now, score: 300 + Math.floor(Math.random() * 4000) }; db.users[u.id] = u; return u.id; };
   var lou = mk('lou.gr', 'Lou', 'Photos floues et plantes vertes.');
   var ines = mk('ines_b', 'Inès', 'Lyon · argentique · thé glacé');
   var malo = mk('malo.wav', 'Malo', 'Je fais du son le soir.');
@@ -102,30 +133,50 @@ function seed(meId) {
   var ids = [meId, lou].sort(), dm = 'dm-' + ids[0] + '-' + ids[1];
   db.chats[dm] = { id: dm, kind: 'dm', members: ids, lastAt: 0 };
   msg(dm, lou, now - 27 * M, 'Bienvenue sur Bulle ! Écris-moi pour tester les messages.');
+  // un snap « vu une fois » qui attend d'être ouvert
+  db.msgs[dm].push({ id: rid(12), by: lou, at: now - 26 * M, text: '', image: art(105, '#F6B6C8', '#D81B55', '#140D10', 720, 1280), once: true });
+  db.chats[dm].lastAt = now - 26 * M; db.chats[dm].lastText = '📸 Snap';
+  // notes : une petite phrase au-dessus de l'avatar, visible 24 h
+  db.notes = {};
+  db.notes[lou] = { by: lou, text: 'Qui est chaud pour un ciné ce soir ? 🎬', at: now - 2 * H };
+  db.notes[malo] = { by: malo, text: '🎧 en boucle depuis ce matin', at: now - 6 * H };
 }
 var LINES = ['Trop bien 😄', 'Haha grave', 'J’arrive dans 10 min', 'Envoie la photo !', 'Ok ça marche', 'Je te dis ça ce soir', 'Attends je regarde', 'Carrément', 'T’es où là ?', 'Mdr'];
 var COMMENTS = ['Trop belle !', 'J’adore', 'Wow', 'La lumière 😍', 'Elle est où ?', 'Magnifique'];
 var pick = function (a) { return a[Math.floor(Math.random() * a.length)]; };
-function botReply(c) {
+var SNAP_LINES = ['Mdrr 😂', 'T’es où là ?', 'Trop beau', 'Renvoie-moi un snap !', 'Haha je garde ça en tête'];
+var COLORS = ['#F6B6C8', '#140D10', '#D81B55', '#FFE1EA', '#B9DDF7', '#CDEBD3'];
+function findMsg(cid, mid) { return (db.msgs[cid] || []).find(function (x) { return x.id === mid; }); }
+function botReply(c, sent) {
   var b = c.kind === 'dm' ? db.users[c.members.find(function (m) { return m !== db.me; })] : pick(bots().filter(function (u) { return u.handle !== 'ines_b'; }));
   if (!b || !b.bot) return;
   // en privé, le contact « ouvre » le message avant de répondre (affiche « Vu »)
   if (c.kind === 'dm') setTimeout(function () { var cur = db.chats[c.id]; if (!cur) return; cur.seen = cur.seen || {}; cur.seen[b.id] = Date.now(); save(); emit('chat', outChat(cur)); }, 500);
+  // il ouvre ton snap, ou réagit parfois à ton message
+  if (c.kind === 'dm' && sent) setTimeout(function () {
+    var m = findMsg(c.id, sent.id); if (!m) return;
+    if (m.once) { if (m.openedAt) return; m.openedAt = Date.now(); m.image = ''; }
+    else if (Math.random() < 0.35) { m.reacts = m.reacts || {}; m.reacts[b.id] = pick(['❤️', '😂', '🔥']); }
+    else return;
+    save(); emit('msgupd', { chatId: c.id, msg: outMsg(m) });
+  }, 1300);
   setTimeout(function () { emit('typing', { chatId: c.id, by: b.id }); }, 700);
   setTimeout(function () {
-    var m = { id: rid(12), by: b.id, at: Date.now(), text: pick(LINES) };
     var cur = db.chats[c.id]; if (!cur) return;
+    var snap = c.kind === 'dm' && Math.random() < 0.22, at = Date.now();
+    var m = snap ? { id: rid(12), by: b.id, at: at, text: '', image: art(Math.floor(Math.random() * 1e6), pick(COLORS), pick(COLORS), pick(COLORS), 720, 1280), once: true }
+      : { id: rid(12), by: b.id, at: at, text: sent && sent.once ? pick(SNAP_LINES) : pick(LINES) };
     (db.msgs[c.id] = db.msgs[c.id] || []).push(m);
-    cur.lastAt = m.at; cur.lastText = m.text; cur.lastBy = b.id; save();
+    cur.lastAt = m.at; cur.lastText = snap ? '📸 Snap' : m.text; cur.lastBy = b.id; markDay(cur, b.id, at); addScore(b.id, snap ? 3 : 1); save();
     emit('msg', { chatId: c.id, msg: outMsg(m) }); emit('chat', outChat(cur));
   }, 2400 + Math.random() * 1200);
 }
 function botsReactTo(postId) {
   bots().forEach(function (b, i) {
     if (Math.random() < 0.25) return;
-    setTimeout(function () { var p = db.posts[postId]; if (!p) return; p.likes[b.id] = true; save(); emit('post', outPost(p)); }, 2500 + i * 1800 + Math.random() * 1500);
+    setTimeout(function () { var p = db.posts[postId]; if (!p) return; p.likes[b.id] = true; save(); emit('post', outPost(p)); pushAct('like', b.id, { post: postId }); save(); }, 2500 + i * 1800 + Math.random() * 1500);
   });
-  setTimeout(function () { var p = db.posts[postId]; if (!p) return; var b = pick(bots()); p.comments.push({ id: rid(10), by: b.id, text: pick(COMMENTS), at: Date.now() }); save(); emit('post', outPost(p)); }, 7000 + Math.random() * 3000);
+  setTimeout(function () { var p = db.posts[postId]; if (!p) return; var b = pick(bots()), text = pick(COMMENTS); p.comments.push({ id: rid(10), by: b.id, text: text, at: Date.now() }); save(); emit('post', outPost(p)); pushAct('comment', b.id, { post: postId, text: text }); save(); }, 7000 + Math.random() * 3000);
 }
 
 /* ---------- routes (mêmes adresses que le futur serveur) ---------- */
@@ -164,7 +215,7 @@ route('GET', '/api/state', function () {
     posts: Object.values(db.posts).sort(function (a, b) { return b.at - a.at; }).map(outPost),
     stories: Object.values(db.stories).sort(function (a, b) { return a.at - b.at; }).map(outStory),
     chats: Object.values(db.chats).filter(function (c) { return canSee(c, u.id); }).map(outChat),
-    online: online
+    online: online, notes: liveNotes(), activity: (db.activity || []).slice(-60)
   };
 });
 route('PUT', '/api/profile', function (b) {
@@ -192,7 +243,8 @@ route('GET', '/api/export', function () {
     posts: Object.values(db.posts).filter(function (p) { return p.by === u.id; }).map(outPost),
     stories: Object.values(db.stories).filter(function (s) { return s.by === u.id; }).map(outStory),
     chats: Object.values(db.chats).filter(function (c) { return canSee(c, u.id); }).map(function (c) { return { chat: outChat(c), messages: (db.msgs[c.id] || []).map(outMsg) }; }),
-    location: (db.places && db.places[u.id]) || null
+    location: (db.places && db.places[u.id]) || null,
+    note: (db.notes && db.notes[u.id]) || null
   };
 });
 // Carte : enregistre ta position (sauf en mode fantôme) et renvoie celle de tes amis
@@ -217,7 +269,7 @@ route('POST', '/api/location', function (b) {
 });
 route('POST', '/api/posts', function (b) {
   var u = me(); var p = { id: rid(12), by: u.id, caption: str(b.caption, 2200), image: image(b.image), at: Date.now(), likes: {}, comments: [] };
-  db.posts[p.id] = p; save(); botsReactTo(p.id); return { post: outPost(p) };
+  db.posts[p.id] = p; addScore(u.id, 5); save(); botsReactTo(p.id); return { post: outPost(p) };
 });
 route('POST', '/api/posts/([0-9a-f]{12})/like', function (b, id) {
   var u = me(), p = getPost(id); if (b.on) p.likes[u.id] = true; else delete p.likes[u.id];
@@ -237,8 +289,9 @@ route('POST', '/api/stories', function (b) {
   // les contacts d'exemple regardent ton snap au bout de quelques secondes
   bots().forEach(function (bt, i) {
     if (Math.random() < 0.2) return;
-    setTimeout(function () { var x = db.stories[s.id]; if (!x) return; x.views = x.views || {}; x.views[bt.id] = Date.now(); save(); emit('story', outStory(x)); }, 3000 + i * 4000 + Math.random() * 2500);
+    setTimeout(function () { var x = db.stories[s.id]; if (!x) return; x.views = x.views || {}; x.views[bt.id] = Date.now(); emit('story', outStory(x)); pushAct('view', bt.id, { story: s.id }); save(); }, 3000 + i * 4000 + Math.random() * 2500);
   });
+  addScore(u.id, 5); save();
   return { story: outStory(s) };
 });
 route('DELETE', '/api/stories/([0-9a-f]{12})', function (b, id) { me(); delete db.stories[id]; save(); return { ok: true }; });
@@ -250,11 +303,51 @@ route('POST', '/api/chats/' + CHAT + '/messages', function (b, cid) {
   var u = me(), c = resolveChat(cid, u.id, true); if (!c) throw fail(404, 'Discussion introuvable.');
   var text = str(b.text, 2000), img = b.image ? image(b.image) : '';
   if (!text && !img) throw fail(400, 'Le message est vide.');
-  var m = { id: rid(12), by: u.id, at: Date.now(), text: text, image: img, reply: b.reply === 'snap' ? 'snap' : null };
-  var list = (db.msgs[cid] = db.msgs[cid] || []); list.push(m); while (list.length > 300) list.shift();
-  c.lastAt = m.at; c.lastText = text ? text.slice(0, 90) : 'Photo'; c.lastBy = u.id; save();
-  botReply(c);
+  var list = (db.msgs[cid] = db.msgs[cid] || []);
+  var reply = b.reply === 'snap' || b.reply === 'note' ? b.reply : null, once = !!(b.once && img && c.kind === 'dm');
+  var qm = typeof b.quote === 'string' ? list.find(function (x) { return x.id === b.quote; }) : null;
+  var m = { id: rid(12), by: u.id, at: Date.now(), text: once ? '' : text, image: img, reply: reply, ref: reply ? str(b.ref, 80) : '',
+    quote: qm ? { id: qm.id, by: qm.by, text: qm.once ? '📸 Snap' : (qm.text ? qm.text.slice(0, 80) : '📷 Photo') } : null };
+  if (once) m.once = true;
+  list.push(m); while (list.length > 300) list.shift();
+  c.lastAt = m.at; c.lastText = once ? '📸 Snap' : text ? text.slice(0, 90) : 'Photo'; c.lastBy = u.id;
+  markDay(c, u.id, m.at); addScore(u.id, once ? 3 : 1); save();
+  botReply(c, m);
   return { msg: outMsg(m), chat: outChat(c) };
+});
+// ouvrir un snap « vu une fois » : l'image est renvoyée une seule fois puis effacée
+route('POST', '/api/chats/' + CHAT + '/messages/([0-9a-f]{12})/open', function (b, cid, mid) {
+  var u = me(), c = resolveChat(cid, u.id, false); if (!c) throw fail(404, 'Discussion introuvable.');
+  var m = findMsg(cid, mid); if (!m || !m.once) throw fail(404, 'Ce snap n’existe plus.');
+  if (m.by === u.id) throw fail(403, 'Ton snap ne peut être ouvert que par ton ami.');
+  if (m.openedAt) throw fail(410, 'Ce snap a déjà été ouvert.');
+  var img = m.image; m.openedAt = Date.now(); m.image = ''; save();
+  emit('msgupd', { chatId: cid, msg: outMsg(m) });
+  return { img: img, msg: outMsg(m) };
+});
+var EMOJIS = ['❤️', '😂', '😮', '😢', '🔥', '👍'];
+route('POST', '/api/chats/' + CHAT + '/messages/([0-9a-f]{12})/react', function (b, cid, mid) {
+  var u = me(), c = resolveChat(cid, u.id, false); if (!c) throw fail(404, 'Discussion introuvable.');
+  var m = findMsg(cid, mid); if (!m) throw fail(404, 'Ce message n’existe plus.');
+  m.reacts = m.reacts || {};
+  if (EMOJIS.indexOf(b.emoji) < 0 || m.reacts[u.id] === b.emoji) delete m.reacts[u.id]; else m.reacts[u.id] = b.emoji;
+  save(); emit('msgupd', { chatId: cid, msg: outMsg(m) });
+  return { msg: outMsg(m) };
+});
+// note : une phrase de 60 caractères max, visible 24 h au-dessus de ton avatar
+route('POST', '/api/note', function (b) {
+  var u = me(), text = str(b.text, 60); db.notes = db.notes || {};
+  var n = { by: u.id, text: text, at: Date.now() };
+  if (text) db.notes[u.id] = n; else delete db.notes[u.id];
+  save(); emit('note', n);
+  // un contact d'exemple répond parfois à ta note
+  if (text) setTimeout(function () {
+    var bt = pick(bots()), ids = [u.id, bt.id].sort(), cid = 'dm-' + ids[0] + '-' + ids[1], c = resolveChat(cid, u.id, true); if (!c) return;
+    var m = { id: rid(12), by: bt.id, at: Date.now(), text: pick(['Haha ta note 😂', 'Grave !', 'Moi aussi', 'Raconte']), reply: 'note', ref: text };
+    (db.msgs[cid] = db.msgs[cid] || []).push(m); c.lastAt = m.at; c.lastText = m.text; c.lastBy = bt.id; markDay(c, bt.id, m.at); save();
+    emit('msg', { chatId: cid, msg: outMsg(m) }); emit('chat', outChat(c));
+  }, 6000 + Math.random() * 3000);
+  return { note: n };
 });
 route('POST', '/api/typing', function () { return { ok: true }; });
 

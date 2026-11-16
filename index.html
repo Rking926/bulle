@@ -50,6 +50,7 @@ try{var p=JSON.parse(localStorage.getItem('bulle.prefs')||'{}'),m=p.mode||'auto'
     <header class="top">
       <button class="brand" type="button" id="brand"><span class="logo"></span><span class="word">bulle</span></button>
       <div class="top-actions">
+        <button class="iconbtn" type="button" id="act-btn" aria-label="Activité"><span class="ico" data-ico="bell"></span><span class="adot" id="act-dot" hidden></span></button>
         <button class="iconbtn" type="button" data-snap aria-label="Nouveau snap"><span class="ico" data-ico="camera"></span></button>
         <button class="iconbtn" type="button" data-tab="chat" aria-label="Messages"><span class="ico" data-ico="send"></span><span class="badge" data-badge hidden></span></button>
       </div>
@@ -83,7 +84,10 @@ try{var p=JSON.parse(localStorage.getItem('bulle.prefs')||'{}'),m=p.mode||'auto'
       </header>
       <div class="msgs" id="msgs" aria-live="polite"></div>
       <div class="typing" id="typing" hidden></div>
+      <div class="th-quote" id="th-quote" hidden></div>
       <form class="th-form" id="th-form" autocomplete="off">
+        <label class="iconbtn snapcam" id="th-snap-l" for="th-snap" aria-label="Envoyer un snap (vu une seule fois)"><span class="ico" data-ico="camera"></span></label>
+        <input type="file" id="th-snap" accept="image/*" capture="environment" hidden>
         <label class="iconbtn" for="th-file" aria-label="Envoyer une photo"><span class="ico" data-ico="image"></span></label>
         <input type="file" id="th-file" accept="image/*" hidden>
         <input type="text" id="th-in" placeholder="Message…" maxlength="2000" aria-label="Message" enterkeyhint="send">

@@ -49,7 +49,11 @@ var ICONS = {
   doc: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5M10 13h6M10 17h6"/>',
   shield: '<path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.2 7.5 9.5 4.3-1.3 7.5-4.9 7.5-9.5V6z"/>',
   spark: '<path d="M12 3l2.2 5.6L20 11l-5.8 2.4L12 19l-2.2-5.6L4 11l5.8-2.4z"/>',
-  chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'
+  chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  reply: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 6 6v5"/>',
+  share: '<path d="M12 3v12M7 8l5-5 5 5M5 13v7h14v-7"/>',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/>',
+  wand: '<path d="m4 20 11-11M14 4v3M19 9h3M17.5 5.5l2-2M12 2v1"/><path d="m13 8 3 3"/>'
 };
 function icon(n) { var s = document.createElement('span'); s.className = 'ico'; s.innerHTML = SV + (ICONS[n] || '') + '</svg>'; return s; }
 $$('[data-ico]').forEach(function (el) { el.innerHTML = SV + (ICONS[el.getAttribute('data-ico')] || '') + '</svg>'; });
@@ -77,7 +81,7 @@ function attempt(p, okMsg) {
 }
 
 /* ================================================================ état */
-var S = { me: null, users: {}, posts: [], stories: [], chats: [], online: new Set(), typing: {}, tab: 'feed', openChat: null, msgs: [], viewUid: null, sheet: null, editing: false, confirmDel: null, forceBottom: false, offline: false, seen: new Set(LS.get('seen', [])) };
+var S = { me: null, users: {}, posts: [], stories: [], chats: [], online: new Set(), typing: {}, tab: 'feed', openChat: null, msgs: [], viewUid: null, sheet: null, editing: false, confirmDel: null, forceBottom: false, offline: false, seen: new Set(LS.get('seen', [])), notes: [], activity: [], quote: null };
 var installEvt = null, swReg = null, es = null;
 
 function who(uid) {
@@ -105,6 +109,8 @@ function applyState(st) {
   S.stories = st.stories.slice().sort(byOldest);
   S.chats = st.chats;
   S.online = new Set(st.online || []);
+  S.notes = st.notes || [];
+  S.activity = (st.activity || []).slice().sort(byNewest);
 }
 
 /* ================================================================ apparence, réglages, offres */
@@ -230,7 +236,7 @@ function isUnread(c) { return !!(c.lastAt && c.lastBy && c.lastBy !== S.me.id &&
 function typersIn(cid) { var t = S.typing[cid] || {}, now = Date.now(); return Object.keys(t).filter(function (u) { return t[u] > now && u !== S.me.id; }); }
 
 /* ================================================================ rendu */
-function renderAll() { if (!S.me) return; renderBanner(); renderNav(); renderFeed(); renderChatList(); if (S.openChat) { renderThreadHead(); renderMsgs(); renderTyping(); } renderProfile(); renderSheetDyn(); }
+function renderAll() { if (!S.me) return; renderBanner(); renderNav(); renderActDot(); renderFeed(); renderChatList(); if (S.openChat) { renderThreadHead(); renderMsgs(); renderTyping(); } renderProfile(); renderSheetDyn(); }
 function renderLight() { if (!S.me) return; renderChatList(); if (S.openChat) { renderThreadHead(); renderTyping(); } if (S.tab === 'profile' && S.viewUid) renderProfile(); }
 
 function renderBanner() {
@@ -309,6 +315,13 @@ function like(p, on) {
   attempt(call('POST', '/api/posts/' + p.id + '/like', { on: on })).then(function (r) { if (!r) { p.likes = before; renderFeed(); renderSheetDyn(); } });
 }
 function removePost(id) { S.posts = S.posts.filter(function (x) { return x.id !== id; }); renderFeed(); renderProfile(); renderSheetDyn(); }
+function emojiBurst(x, y, e) {
+  var r = $('#phone').getBoundingClientRect();
+  if (!x && !y) { x = r.left + r.width / 2; y = r.top + r.height / 2; }
+  var b = h('div', { class: 'burst emj', style: 'left:' + (x - r.left) + 'px;top:' + (y - r.top) + 'px', text: e });
+  $('#phone').append(b); setTimeout(function () { b.remove(); }, 1200);
+  if (navigator.vibrate) navigator.vibrate(12);
+}
 function burst(x, y) {
   var r = $('#phone').getBoundingClientRect();
   var b = h('div', { class: 'burst', style: 'left:' + (x - r.left) + 'px;top:' + (y - r.top) + 'px' }, icon('heart'));
@@ -318,6 +331,7 @@ function burst(x, y) {
 
 function renderChatList() {
   var box = $('#chatlist'); box.replaceChildren();
+  box.append(notesStrip());
   // invitation à activer les notifications (une seule fois, tant que le navigateur n'a rien répondu)
   if ('Notification' in window && Notification.permission === 'default' && !LS.get('notifAsked', false)) {
     box.append(h('div', { class: 'card ask' }, h('h3', { text: 'Ne rate aucun message' }), h('p', { text: 'Active les notifications pour savoir tout de suite quand on t’écrit.' }),
@@ -326,15 +340,86 @@ function renderChatList() {
   }
   visibleChats().forEach(function (c) {
     var un = isUnread(c), typers = typersIn(c.id), other = otherOf(c);
+    var snapIn = c.lastText === '📸 Snap' && c.lastBy && c.lastBy !== S.me.id;
     var prev = typers.length ? h('span', { class: 'typing-txt', text: (c.kind === 'group' ? who(typers[0]).name + ' ' : '') + 'écrit…' })
+      : snapIn && un ? h('span', { class: 'typing-txt', text: '📸 Nouveau snap · appuie pour voir' })
       : h('span', { text: c.lastText ? ((c.lastBy === S.me.id ? 'Toi : ' : (c.kind === 'group' && c.lastBy ? who(c.lastBy).name + ' : ' : '')) + c.lastText) : (c.kind === 'group' ? 'Tout le monde peut écrire ici' : 'Nouvelle discussion') });
     box.append(h('div', { class: 'crow-w' }, h('button', { class: 'crow' + (un ? ' unread' : ''), type: 'button', onclick: function () { openChat(c); } },
       c.kind === 'group' ? groupAvatar(52) : avatar(other, 52, true),
       h('span', { class: 't' }, h('b', { text: chatTitle(c) }), prev),
-      h('span', { class: 'meta' }, c.lastAt ? h('time', { text: ago(c.lastAt) }) : (c.kind === 'group' ? h('time', { text: S.online.size + ' en ligne' }) : null), un ? h('span', { class: 'udot', 'aria-label': 'Non lu' }) : null)),
+      h('span', { class: 'meta' }, c.lastAt ? h('time', { text: ago(c.lastAt) }) : (c.kind === 'group' ? h('time', { text: S.online.size + ' en ligne' }) : null),
+        c.streak ? h('span', { class: 'streak' + (c.streakRisk ? ' risk' : ''), title: c.streakRisk ? 'Ta flamme va s’éteindre : écrivez-vous avant minuit' : c.streak + (c.streak > 1 ? ' jours' : ' jour') + ' d’affilée', text: '🔥 ' + c.streak + (c.streakRisk ? ' ⏳' : '') }) : null,
+        un ? h('span', { class: 'udot', 'aria-label': 'Non lu' }) : null)),
       un && c.kind === 'dm' ? h('button', { class: 'peekbtn', type: 'button', 'aria-label': 'Entrouvrir le message de ' + chatTitle(c) + ' sans le marquer comme lu', onclick: function () { peek(c); } }, icon('eye'), hasPlus() ? null : h('span', { class: 'tier', text: '+' })) : null));
   });
-  box.append(h('button', { class: 'btn block', type: 'button', style: 'margin-top:12px', onclick: openNewChat }, icon('edit'), 'Écrire à quelqu’un'));
+  box.append(h('button', { class: 'btn block', type: 'button', style: 'margin-top:12px', onclick: openNewChat }, icon('edit'), 'Écrire à quelqu’un'),
+    h('button', { class: 'btn block', type: 'button', style: 'margin-top:8px', onclick: invite }, icon('share'), 'Inviter des amis sur Bulle'));
+}
+// inviter ses amis : feuille de partage du téléphone, sinon lien copié
+function invite() {
+  var url = new URL('./', location.href).href, text = 'Rejoins-moi sur Bulle ! Mon pseudo : @' + S.me.handle;
+  if (navigator.share) { navigator.share({ title: 'Bulle', text: text, url: url }).catch(function () {}); return; }
+  if (navigator.clipboard) navigator.clipboard.writeText(text + ' ' + url).then(function () { toast('Lien copié : colle-le à tes amis'); }, function () { toast(url); });
+  else toast(url);
+}
+
+/* ---------------- notes (petite phrase au-dessus de l'avatar, 24 h) */
+function noteOf(uid) { var cut = Date.now() - DAY; return S.notes.find(function (n) { return n.by === uid && n.at > cut; }); }
+function notesStrip() {
+  var me = S.me.id, mine = noteOf(me), cut = Date.now() - DAY;
+  var others = S.notes.filter(function (n) { return n.by !== me && n.at > cut; }).sort(byNewest);
+  var row = h('div', { class: 'notes', role: 'list', 'aria-label': 'Notes de tes amis' });
+  row.append(h('button', { class: 'note-it mine', type: 'button', role: 'listitem', 'aria-label': mine ? 'Ta note : ' + mine.text : 'Écrire une note', onclick: editNote },
+    h('span', { class: 'note-bub' + (mine ? '' : ' empty'), text: mine ? mine.text : 'Ta note…' }), avatar(me, 58), h('small', { text: 'Ta note' })));
+  others.forEach(function (n) {
+    row.append(h('button', { class: 'note-it', type: 'button', role: 'listitem', 'aria-label': 'Note de ' + who(n.by).name + ' : ' + n.text, onclick: function () { openNote(n); } },
+      h('span', { class: 'note-bub', text: n.text }), avatar(n.by, 58), h('small', { text: who(n.by).name })));
+  });
+  return row;
+}
+function editNote() {
+  var cur = noteOf(S.me.id);
+  var inp = h('input', { id: 'note-in', maxlength: '60', placeholder: 'Une pensée, un plan, une chanson…', autocomplete: 'off', value: cur ? cur.text : '' });
+  var count = h('span', { class: 'hint', text: '' });
+  function sync() { count.textContent = (60 - inp.value.length) + ' caractères restants · visible par tes amis pendant 24 h'; }
+  inp.addEventListener('input', sync); sync();
+  function save(text) { attempt(call('POST', '/api/note', { text: text }), text ? 'Note partagée' : 'Note supprimée').then(function (r) { if (r) { setNote(r.note); closeSheet(); } }); }
+  openSheet('Ta note', h('form', { class: 'form', onsubmit: function (e) { e.preventDefault(); save(inp.value.trim()); } },
+    h('div', { class: 'note-prev' }, h('span', { class: 'note-bub big' }, inp), avatar(S.me.id, 72)), count,
+    h('button', { class: 'btn primary', type: 'submit' }, 'Partager'),
+    cur ? h('button', { class: 'btn', type: 'button', onclick: function () { save(''); } }, icon('trash'), 'Supprimer ma note') : null));
+  setTimeout(function () { inp.focus(); }, 60);
+}
+function setNote(n) { S.notes = S.notes.filter(function (x) { return x.by !== n.by; }); if (n.text) S.notes.push(n); renderChatList(); }
+function openNote(n) {
+  var w = who(n.by);
+  var inp = h('input', { id: 'note-reply', maxlength: '500', placeholder: 'Répondre à ' + w.name + '…', autocomplete: 'off', enterkeyhint: 'send' });
+  openSheet('Note de ' + w.name, h('form', { class: 'form', onsubmit: function (e) {
+    e.preventDefault(); var t = inp.value.trim(); if (!t) { inp.focus(); return; }
+    sendMsg(dmFor(n.by), { text: t, reply: 'note', ref: n.text }).then(function (ok) { if (ok) { closeSheet(); toast('Réponse envoyée à ' + w.name); } });
+  } }, h('div', { class: 'note-prev' }, h('span', { class: 'note-bub big', text: n.text }), avatar(n.by, 72), h('small', { class: 'hint', text: ago(n.at) })),
+    h('div', { class: 'quick' }, ['😂', '😍', '🔥', '🙌'].map(function (e) { return h('button', { type: 'button', class: 'emo', 'aria-label': 'Répondre ' + e, onclick: function () { inp.value = e; inp.form.requestSubmit(); } }, e); })),
+    h('div', { class: 'inrow' }, inp, h('button', { class: 'sendbtn', type: 'submit', 'aria-label': 'Envoyer' }, icon('send')))));
+}
+
+/* ---------------- activité (j'aime, commentaires, vues) */
+function actSeen() { return LS.get('actSeen.' + S.me.id, 0); }
+function renderActDot() { var d = $('#act-dot'); if (d) d.hidden = !S.activity.some(function (a) { return a.at > actSeen(); }); }
+var ACT = { like: 'a aimé ta photo.', comment: 'a commenté : ', view: 'a vu ton snap.' };
+function openActivity() { openSheet('Activité', h('div', { id: 'act-list', class: 'act' }), { type: 'activity' }); renderActivity(); }
+function renderActivity() {
+  var box = $('#act-list'); if (!box) return; box.replaceChildren();
+  LS.set('actSeen.' + S.me.id, Date.now()); renderActDot();
+  if (!S.activity.length) { box.append(h('div', { class: 'empty' }, icon('bell'), h('p', { text: 'Quand on aimera, commentera ou regardera ce que tu publies, ça s’affichera ici.' }))); return; }
+  var lastDay = '';
+  S.activity.forEach(function (a) {
+    var d = dayLabel(a.at); if (d !== lastDay) { box.append(h('div', { class: 'sep', text: d })); lastDay = d; }
+    var p = a.post && S.posts.find(function (x) { return x.id === a.post; }), s = a.story && S.stories.find(function (x) { return x.id === a.story; });
+    var thumb = p ? cachedImg('a' + a.id, p.img, '') : s ? h('img', { src: s.img, alt: '' }) : null;
+    box.append(h('button', { class: 'act-row', type: 'button', onclick: function () { if (p) openPost(p.id); else showProfile(a.by); } },
+      avatar(a.by, 44), h('span', { class: 't' }, h('b', { text: who(a.by).name + ' ' }), ACT[a.type] || '', a.text ? '« ' + a.text + ' »' : '', h('small', { text: ' ' + ago(a.at) })),
+      thumb ? h('span', { class: 'act-th' }, thumb) : null));
+  });
 }
 // Bulle+ : lire les derniers messages sans les marquer comme lus
 function peek(c) {
@@ -353,8 +438,9 @@ function peek(c) {
 /* ---------------- discussion ouverte */
 var msgReq = 0;
 function openChat(c) {
-  S.openChat = c; S.msgs = []; S.forceBottom = true; markRead(c.id);
-  closeSheet(); $('#thread').hidden = false; $('#th-in').value = '';
+  S.openChat = c; S.msgs = []; S.forceBottom = true; S.quote = null; markRead(c.id);
+  closeSheet(); $('#thread').hidden = false; $('#th-in').value = ''; renderQuote();
+  $('#th-snap-l').hidden = c.kind !== 'dm';
   renderThreadHead(); renderMsgs(); renderTyping(); renderNav(); renderChatList();
   var req = ++msgReq;
   call('GET', '/api/chats/' + c.id + '/messages').then(function (r) {
@@ -363,7 +449,7 @@ function openChat(c) {
   }, function (e) { if (e.status === 401) showAuth(); else toast(e.message); });
   if (window.matchMedia('(hover:hover)').matches) setTimeout(function () { $('#th-in').focus(); }, 60);
 }
-function closeThread() { S.openChat = null; S.msgs = []; $('#thread').hidden = true; renderChatList(); renderNav(); }
+function closeThread() { S.openChat = null; S.msgs = []; S.quote = null; $('#thread').hidden = true; renderChatList(); renderNav(); }
 function renderThreadHead() {
   var c = S.openChat, box = $('#th-who'); box.replaceChildren(); if (!c) return;
   if (c.kind === 'group') {
@@ -389,9 +475,15 @@ function renderMsgs() {
     var mine = m.by === me;
     if (group && !mine && first) box.append(h('div', { class: 'sender', text: who(m.by).name }));
     var col = h('div', { class: 'mcol' });
-    if (m.reply === 'snap') col.append(h('span', { class: 'rtag', text: mine ? 'Tu as répondu à un snap' : 'A répondu à ton snap' }));
+    if (m.reply === 'snap') col.append(h('span', { class: 'rtag', text: mine ? 'Tu as réagi à son snap' : 'A réagi à ton snap' }));
+    if (m.reply === 'note') col.append(h('span', { class: 'rtag', text: mine ? 'Tu as répondu à sa note' : 'A répondu à ta note' }), m.ref ? h('span', { class: 'quote note', text: m.ref }) : null);
+    if (m.quote) col.append(h('button', { class: 'quote', type: 'button', onclick: function () { var t = $('[data-mid="' + m.quote.id + '"]'); if (t) { t.scrollIntoView({ block: 'center', behavior: 'smooth' }); t.classList.add('flash'); setTimeout(function () { t.classList.remove('flash'); }, 1200); } } },
+      h('b', { text: m.quote.by === me ? 'Toi' : who(m.quote.by).name }), h('span', { text: m.quote.text })));
+    if (m.once) col.append(snapBubble(m, mine));
     if (m.img) col.append(h('button', { class: 'bub pic', type: 'button', 'aria-label': 'Agrandir la photo', onclick: function () { viewImage(m.img); } }, cachedImg('m' + m.id, m.img, 'Photo envoyée')));
-    if (m.text) col.append(h('div', { class: 'bub', text: m.text }));
+    if (m.text) col.append(h('div', { class: 'bub' + (/^(?:\p{Extended_Pictographic}️?){1,3}$/u.test(m.text) ? ' big' : ''), text: m.text }));
+    var rx = reactsOf(m); if (rx) col.append(rx);
+    msgGestures(col, m);
     // dernier message envoyé en privé : « Vu » ou « Envoyé » (si les confirmations de lecture sont actives)
     var status = '';
     if (mine && !group && i === ms.length - 1) {
@@ -399,7 +491,7 @@ function renderMsgs() {
       status = privacy().readReceipts && seenAt >= m.at ? ' · Vu' : ' · Envoyé';
     }
     if (last) col.append(h('span', { class: 'mtime', text: hhmm(m.at) + status }));
-    var row = h('div', { class: 'mrow ' + (mine ? 'me' : 'them') + (last ? ' last' : '') });
+    var row = h('div', { class: 'mrow ' + (mine ? 'me' : 'them') + (last ? ' last' : ''), 'data-mid': m.id });
     if (!mine) row.append(last ? avatar(m.by, 28) : h('span', { class: 'spacer' }));
     row.append(col); box.append(row);
   });
@@ -410,6 +502,73 @@ function renderTyping() {
   var ids = S.openChat ? typersIn(S.openChat.id) : [];
   t.hidden = !ids.length; if (!ids.length) return;
   t.append(h('span', { class: 'dots', 'aria-hidden': 'true' }, h('i'), h('i'), h('i')), h('span', { text: (ids.length > 1 ? ids.length + ' personnes écrivent' : who(ids[0]).name + ' écrit') + '…' }));
+}
+/* snaps « vu une fois » : l'image s'ouvre une seule fois, 10 secondes, puis disparaît */
+function snapBubble(m, mine) {
+  var label = mine ? (m.opened ? 'Ouvert' : 'Snap envoyé') : (m.opened ? 'Snap ouvert' : 'Appuie pour voir le snap');
+  var live = !mine && !m.opened;
+  return h('button', { class: 'snapmsg' + (live ? ' live' : ''), type: 'button', 'aria-disabled': live ? null : 'true', onclick: function () { if (live) openSnapMsg(m); } },
+    h('span', { class: 'sq', 'aria-hidden': 'true' }), h('span', { text: label }));
+}
+function openSnapMsg(m) {
+  var c = S.openChat; if (!c) return;
+  call('POST', '/api/chats/' + c.id + '/messages/' + m.id + '/open').then(function (r) {
+    m.opened = true; renderMsgs();
+    var bar = h('i'), raf = 0, t0 = performance.now();
+    var v = h('div', { class: 'snapview', role: 'dialog', 'aria-label': 'Snap de ' + who(m.by).name },
+      h('img', { src: r.img, alt: 'Snap de ' + who(m.by).name }),
+      h('div', { class: 'sv-top' }, h('div', { class: 'sv-bars' }, h('span', { class: 'sv-bar' }, bar)),
+        h('div', { class: 'sv-head' }, h('span', { class: 'sv-who' }, avatar(m.by, 32), h('b', { text: who(m.by).name }), h('time', { text: 'vu une seule fois' })))));
+    function close() { cancelAnimationFrame(raf); v.remove(); }
+    function step(now) { var p = (now - t0) / 10000; bar.style.width = Math.min(100, p * 100) + '%'; if (p >= 1) close(); else raf = requestAnimationFrame(step); }
+    v.addEventListener('click', close);
+    $('#phone').append(v); raf = requestAnimationFrame(step);
+  }, function (e) { m.opened = true; renderMsgs(); toast(e.message); });
+}
+/* réactions : double-tap = ❤️, appui long (ou clic droit) = menu */
+var EMOJIS = ['❤️', '😂', '😮', '😢', '🔥', '👍'];
+function reactsOf(m) {
+  var r = m.reacts || {}, ids = Object.keys(r); if (!ids.length) return null;
+  var uniq = []; ids.forEach(function (u) { if (uniq.indexOf(r[u]) < 0) uniq.push(r[u]); });
+  return h('button', { class: 'reacts' + (r[S.me.id] ? ' mine' : ''), type: 'button', 'aria-label': ids.map(function (u) { return (u === S.me.id ? 'Toi' : who(u).name) + ' ' + r[u]; }).join(', '), onclick: function () { msgMenu(m); } },
+    uniq.join(''), ids.length > 1 ? h('small', { text: String(ids.length) }) : null);
+}
+function react(m, emoji) {
+  var c = S.openChat; if (!c) return;
+  m.reacts = Object.assign({}, m.reacts); if (m.reacts[S.me.id] === emoji) delete m.reacts[S.me.id]; else m.reacts[S.me.id] = emoji;
+  renderMsgs(); if (navigator.vibrate) navigator.vibrate(10);
+  call('POST', '/api/chats/' + c.id + '/messages/' + m.id + '/react', { emoji: emoji }).catch(function (e) { toast(e.message); });
+}
+function msgGestures(el, m) {
+  var lastTap = 0, timer = 0;
+  el.addEventListener('dblclick', function (e) { if (e.target.closest('.snapmsg,.quote')) return; react(m, '❤️'); });
+  el.addEventListener('contextmenu', function (e) { e.preventDefault(); msgMenu(m); });
+  el.addEventListener('pointerdown', function (e) { if (e.pointerType !== 'touch') return; timer = setTimeout(function () { timer = 0; msgMenu(m); }, 480); });
+  ['pointermove', 'pointercancel'].forEach(function (t) { el.addEventListener(t, function () { clearTimeout(timer); }); });
+  el.addEventListener('pointerup', function (e) {
+    if (e.pointerType !== 'touch') return; clearTimeout(timer);
+    if (e.target.closest('.snapmsg,.quote,.pic')) return;
+    var t = Date.now(); if (t - lastTap < 300) { react(m, '❤️'); lastTap = 0; } else lastTap = t;
+  });
+}
+function msgMenu(m) {
+  var mine = m.by === S.me.id, cur = (m.reacts || {})[S.me.id];
+  openSheet('Message', h('div', { class: 'form' },
+    h('div', { class: 'quick' }, EMOJIS.map(function (e) { return h('button', { type: 'button', class: 'emo' + (cur === e ? ' on' : ''), 'aria-pressed': String(cur === e), 'aria-label': 'Réagir ' + e, onclick: function () { closeSheet(); react(m, e); } }, e); })),
+    reactsList(m),
+    navRow('reply', 'Répondre', function () { closeSheet(); setQuote(m); }),
+    m.text ? navRow('copy', 'Copier le texte', function () { closeSheet(); if (navigator.clipboard) navigator.clipboard.writeText(m.text).then(function () { toast('Copié'); }); }) : null,
+    h('p', { class: 'hint', text: (mine ? 'Envoyé ' : 'Reçu ') + dayLabel(m.at).toLowerCase() + ' à ' + hhmm(m.at) })));
+}
+function reactsList(m) {
+  var r = m.reacts || {}, ids = Object.keys(r); if (!ids.length) return null;
+  return h('div', { class: 'rx-list' }, ids.map(function (u) { return h('div', { class: 'rx-row' }, avatar(u, 28), h('b', { text: u === S.me.id ? 'Toi' : who(u).name }), h('span', { text: r[u] })); }));
+}
+function setQuote(m) { S.quote = m; renderQuote(); $('#th-in').focus(); }
+function renderQuote() {
+  var q = $('#th-quote'), m = S.quote; q.replaceChildren(); q.hidden = !m; if (!m) return;
+  q.append(icon('reply'), h('span', { class: 't' }, h('b', { text: 'Réponse à ' + (m.by === S.me.id ? 'toi-même' : who(m.by).name) }), h('span', { text: m.once ? '📸 Snap' : (m.text || '📷 Photo') })),
+    h('button', { class: 'iconbtn', type: 'button', 'aria-label': 'Annuler la réponse', onclick: function () { S.quote = null; renderQuote(); } }, icon('close')));
 }
 function sendMsg(chat, payload) {
   return attempt(call('POST', '/api/chats/' + chat.id + '/messages', payload)).then(function (r) {
@@ -438,7 +597,10 @@ function renderProfile() {
   else pf.append(h('div', { class: 'pf-bar' }, h('button', { class: 'iconbtn', type: 'button', 'aria-label': 'Paramètres', onclick: openSettings }, icon('gear'))));
   pf.append(h('div', { class: 'pf-head' },
     h('button', { class: 'pf-av' + (snaps.length ? '' : ' plain'), type: 'button', 'aria-label': snaps.length ? 'Voir ses snaps' : 'Photo de profil', onclick: function () { if (!snaps.length) return; var gs = storyGroups(); var i = gs.findIndex(function (g) { return g.uid === uid; }); if (i >= 0) openStories(gs, i); } }, avatar(uid, 88)),
-    h('div', { class: 'pf-id' }, h('h1', { class: 'pf-name' }, w.name, tierChip((S.users[uid] || {}).plan, true)), h('p', { class: 'pf-handle', text: '@' + w.handle }), !mine && S.online.has(uid) ? h('p', { class: 'on-line', text: 'En ligne' }) : null)));
+    h('div', { class: 'pf-id' }, h('h1', { class: 'pf-name' }, w.name, tierChip((S.users[uid] || {}).plan, true)), h('p', { class: 'pf-handle', text: '@' + w.handle }), !mine && S.online.has(uid) ? h('p', { class: 'on-line', text: 'En ligne' }) : null,
+      h('p', { class: 'pf-chips' }, h('span', { class: 'pchip', title: 'Score Bulle : grimpe à chaque message, snap et publication', text: '⭐ ' + ((S.users[uid] || {}).score || 0) }),
+        !mine && dmFor(uid).streak ? h('span', { class: 'pchip', title: 'Jours d’affilée où vous vous êtes écrit', text: '🔥 ' + dmFor(uid).streak }) : null,
+        noteOf(uid) ? h('span', { class: 'pchip note', text: '💬 ' + noteOf(uid).text }) : null))));
   if (w.bio) pf.append(h('p', { class: 'pf-bio', text: w.bio }));
   pf.append(h('dl', { class: 'pf-stats' },
     h('div', {}, h('dt', { text: posts.length > 1 ? 'publications' : 'publication' }), h('dd', { text: String(posts.length) })),
@@ -451,7 +613,7 @@ function renderProfile() {
   if (mine) {
     pf.append(proCard(posts, snaps));
     pf.append(installCard());
-    pf.append(h('div', { class: 'settings' }, navRow('gear', 'Paramètres et confidentialité', openSettings)));
+    pf.append(h('div', { class: 'settings' }, navRow('share', 'Inviter des amis', invite), navRow('gear', 'Paramètres et confidentialité', openSettings)));
   }
   box.append(pf);
 }
@@ -685,6 +847,7 @@ function renderSheetDyn() {
   if (S.sheet.type === 'comments') renderComments();
   if (S.sheet.type === 'settings') renderSettings();
   if (S.sheet.type === 'plans') renderPlans();
+  if (S.sheet.type === 'activity') renderActivity();
   if (S.sheet.type === 'post') { var box = $('#sheet-post'); if (!box) return; var p = S.posts.find(function (x) { return x.id === S.sheet.id; }); box.replaceChildren(p ? postCard(p) : h('p', { text: 'Cette publication a été supprimée.' })); }
 }
 function openPost(id) { openSheet('Publication', h('div', { id: 'sheet-post' }), { type: 'post', id: id }); renderSheetDyn(); }
@@ -723,8 +886,51 @@ function openNewChat() {
   inp.addEventListener('input', draw); draw();
   openSheet('Nouveau message', h('div', { style: 'display:flex;flex-direction:column;gap:12px' }, inp, list));
 }
+/* filtres photo (calculés pixel par pixel : même rendu sur tous les téléphones) */
+var FILTERS = [
+  { id: 'none', name: 'Normal' },
+  { id: 'rose', name: 'Rosé', sat: 1.05, tint: [18, -6, 10] },
+  { id: 'eclat', name: 'Éclat', sat: 1.35, con: 1.12 },
+  { id: 'chaud', name: 'Chaud', sat: 1.1, tint: [18, 5, -16] },
+  { id: 'froid', name: 'Froid', sat: 0.95, tint: [-14, 2, 20] },
+  { id: 'vintage', name: 'Vintage', sepia: 0.55, con: 0.9, tint: [10, 2, -8] },
+  { id: 'noir', name: 'Noir', sat: 0, con: 1.2 }
+];
+function filterPixels(d, f) {
+  var s = f.sat == null ? 1 : f.sat, c = f.con || 1, sp = f.sepia || 0, t = f.tint || [0, 0, 0];
+  for (var i = 0; i < d.length; i += 4) {
+    var r = d[i], g = d[i + 1], b = d[i + 2], l = 0.299 * r + 0.587 * g + 0.114 * b;
+    r = l + (r - l) * s; g = l + (g - l) * s; b = l + (b - l) * s;
+    if (sp) { var sr = 0.393 * r + 0.769 * g + 0.189 * b, sg = 0.349 * r + 0.686 * g + 0.168 * b, sb = 0.272 * r + 0.534 * g + 0.131 * b; r += (sr - r) * sp; g += (sg - g) * sp; b += (sb - b) * sp; }
+    d[i] = (r - 128) * c + 128 + t[0]; d[i + 1] = (g - 128) * c + 128 + t[1]; d[i + 2] = (b - 128) * c + 128 + t[2];
+  }
+}
+function applyFilter(src, fid, max, q) {
+  var f = FILTERS.find(function (x) { return x.id === fid; });
+  return new Promise(function (res, rej) {
+    var im = new Image(); im.onerror = rej;
+    im.onload = function () {
+      var k = Math.min(1, (max || 1e5) / Math.max(im.width, im.height)), c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(im.width * k)); c.height = Math.max(1, Math.round(im.height * k));
+      var x = c.getContext('2d'); x.drawImage(im, 0, 0, c.width, c.height);
+      if (f && f.id !== 'none') { var px = x.getImageData(0, 0, c.width, c.height); filterPixels(px.data, f); x.putImageData(px, 0, 0); }
+      res(c.toDataURL('image/jpeg', q || 0.86));
+    };
+    im.src = src;
+  });
+}
 function openComposer(mode) {
-  var st = { mode: mode || 'post', file: null, url: null };
+  var st = { mode: mode || 'post', file: null, url: null, base: null, shown: null, filter: 'none', thumbs: {} };
+  var frow = h('div', { class: 'filters', role: 'radiogroup', 'aria-label': 'Filtre' });
+  function drawFilters() {
+    frow.replaceChildren(); frow.hidden = !st.base;
+    FILTERS.forEach(function (f) {
+      frow.append(h('button', { type: 'button', role: 'radio', class: 'flt', 'aria-checked': String(st.filter === f.id), onclick: function () {
+        st.filter = f.id; drawFilters();
+        applyFilter(st.base, f.id, 900, 0.8).then(function (u) { if (st.filter === f.id) { st.shown = u; sync(); } });
+      } }, h('span', { class: 'flt-im' }, st.thumbs[f.id] ? h('img', { src: st.thumbs[f.id], alt: '' }) : null), h('small', { text: f.name })));
+    });
+  }
   var seg = h('div', { class: 'seg', role: 'tablist', 'aria-label': 'Type de publication' });
   var drop = h('label', { class: 'drop', for: 'cmp-pick' });
   var pick = h('input', { type: 'file', accept: 'image/*', id: 'cmp-pick', hidden: true });
@@ -734,7 +940,14 @@ function openComposer(mode) {
   var capField = h('div', { class: 'field' }, h('label', { for: 'cmp-cap', text: 'Légende' }), cap);
   var snapField = h('div', { class: 'field' }, h('label', { for: 'cmp-snap', text: 'Texte du snap' }), stx, h('span', { class: 'hint', text: 'Visible 24 h, puis il disparaît.' }));
   var go = h('button', { class: 'btn primary', type: 'submit' }, 'Partager');
-  function setFile(f) { if (!f || !/^image\//.test(f.type)) { if (f) toast('Choisis une image (JPEG, PNG…).'); return; } if (st.url) URL.revokeObjectURL(st.url); st.file = f; st.url = URL.createObjectURL(f); sync(); }
+  function setFile(f) {
+    if (!f || !/^image\//.test(f.type)) { if (f) toast('Choisis une image (JPEG, PNG…).'); return; }
+    if (st.url) URL.revokeObjectURL(st.url); st.file = f; st.url = URL.createObjectURL(f); st.base = null; st.shown = null; st.filter = 'none'; st.thumbs = {}; sync(); drawFilters();
+    shrink(f, 900, 0.82).then(function (base) {
+      if (st.file !== f) return; st.base = base; st.shown = base; drawFilters();
+      FILTERS.forEach(function (x) { applyFilter(base, x.id, 120, 0.7).then(function (u) { if (st.file !== f) return; st.thumbs[x.id] = u; drawFilters(); }); });
+    }).catch(function () {});
+  }
   pick.addEventListener('change', function () { setFile(pick.files[0]); });
   cam.addEventListener('change', function () { setFile(cam.files[0]); });
   stx.addEventListener('input', sync);
@@ -744,7 +957,7 @@ function openComposer(mode) {
     seg.replaceChildren();
     [['post', 'Publication'], ['snap', 'Snap · 24 h']].forEach(function (m) { seg.append(h('button', { type: 'button', role: 'tab', 'aria-selected': String(st.mode === m[0]), onclick: function () { st.mode = m[0]; sync(); } }, m[1])); });
     drop.className = 'drop' + (st.mode === 'snap' ? ' snap' : '') + (st.url ? ' has' : ''); drop.replaceChildren();
-    if (st.url) { drop.append(h('img', { src: st.url, alt: 'Aperçu' })); if (st.mode === 'snap' && stx.value.trim()) drop.append(h('div', { class: 'snapcap', text: stx.value.trim() })); }
+    if (st.url) { drop.append(h('img', { src: st.shown || st.url, alt: 'Aperçu' })); if (st.mode === 'snap' && stx.value.trim()) drop.append(h('div', { class: 'snapcap', text: stx.value.trim() })); }
     else drop.append(h('span', { class: 'ph' }, icon('image'), h('span', { text: 'Choisis une photo' })));
     capField.hidden = st.mode !== 'post'; snapField.hidden = st.mode !== 'snap';
     go.textContent = st.mode === 'post' ? 'Partager' : 'Envoyer le snap';
@@ -752,14 +965,14 @@ function openComposer(mode) {
   var form = h('form', { class: 'form', onsubmit: function (e) {
     e.preventDefault(); if (!st.file) { toast('Choisis une photo d’abord.'); return; }
     go.disabled = true; var label = go.textContent; go.textContent = 'Envoi…';
-    shrink(st.file).then(function (img) {
+    shrink(st.file).then(function (img) { return st.filter === 'none' ? img : applyFilter(img, st.filter, 0, 0.84); }).then(function (img) {
       return st.mode === 'post'
         ? attempt(call('POST', '/api/posts', { image: img, caption: cap.value.trim() }), 'Publié').then(function (r) { if (r) { upsert(S.posts, r.post, byNewest); } return r; })
         : attempt(call('POST', '/api/stories', { image: img, text: stx.value.trim() }), 'Snap envoyé · visible 24 h').then(function (r) { if (r) { upsert(S.stories, r.story, byOldest); } return r; });
     }, function () { toast('Cette image n’a pas pu être lue. Essaie un JPEG ou un PNG.'); return false; })
       .then(function (r) { go.disabled = false; go.textContent = label; if (r) { closeSheet(); if (S.openChat) closeThread(); switchTab('feed'); } });
-  } }, seg, drop, pick, cam, h('div', { class: 'pick-row' }, h('label', { class: 'btn small', for: 'cmp-pick' }, icon('image'), 'Galerie'), h('label', { class: 'btn small', for: 'cmp-cam' }, icon('camera'), 'Appareil photo')), capField, snapField, go);
-  sync(); openSheet('Créer', form);
+  } }, seg, drop, frow, pick, cam, h('div', { class: 'pick-row' }, h('label', { class: 'btn small', for: 'cmp-pick' }, icon('image'), 'Galerie'), h('label', { class: 'btn small', for: 'cmp-cam' }, icon('camera'), 'Appareil photo')), capField, snapField, go);
+  sync(); drawFilters(); openSheet('Créer', form);
 }
 
 /* ---------------- snaps */
@@ -826,8 +1039,15 @@ function buildStory() {
   } else {
     var liked = LS.get('storyLikes', []).indexOf(s.id) >= 0;
     var ri = h('input', { id: 'sv-reply', class: 'sv-reply', placeholder: 'Répondre à ' + (w.handle || w.name) + '…', maxlength: '500', autocomplete: 'off', 'aria-label': 'Réponse au snap', enterkeyhint: 'send' });
-    ri.addEventListener('focus', function () { SVs.paused = true; });
-    ri.addEventListener('blur', function () { if (SVs) { SVs.paused = false; SVs.last = performance.now(); } });
+    // réactions rapides façon Instagram : elles apparaissent quand on commence à répondre
+    var quick = h('div', { class: 'sv-quick', hidden: true }, ['😂', '😮', '😍', '😢', '👏', '🔥'].map(function (e) {
+      return h('button', { type: 'button', class: 'emo', 'aria-label': 'Réagir ' + e, onpointerdown: function (ev) { ev.preventDefault(); }, onclick: function (ev) {
+        emojiBurst(ev.clientX || 0, ev.clientY || 0, e); ri.blur();
+        sendMsg(dmFor(g.uid), { text: e, reply: 'snap' }).then(function (ok) { if (ok) toast('Réaction envoyée à ' + w.name); });
+      } }, e);
+    }));
+    ri.addEventListener('focus', function () { SVs.paused = true; quick.hidden = false; });
+    ri.addEventListener('blur', function () { quick.hidden = true; if (SVs) { SVs.paused = false; SVs.last = performance.now(); } });
     var heart = h('button', { class: 'sv-ic' + (liked ? ' liked' : ''), type: 'button', 'aria-pressed': String(liked), 'aria-label': 'J’aime ce snap', onclick: function (ev) {
       if (liked) return;
       liked = true; heart.classList.add('liked'); heart.setAttribute('aria-pressed', 'true');
@@ -836,7 +1056,7 @@ function buildStory() {
       sendMsg(dmFor(g.uid), { text: '❤️', reply: 'snap' });
     } }, icon('heart'));
     var send = function () { var t = ri.value.trim(); if (!t) { ri.focus(); return; } ri.value = ''; ri.blur(); sendMsg(dmFor(g.uid), { text: t, reply: 'snap' }).then(function (ok) { if (ok) toast('Réponse envoyée à ' + w.name); }); };
-    foot = h('form', { class: 'sv-foot', onsubmit: function (e) { e.preventDefault(); send(); } }, ri, heart,
+    foot = h('form', { class: 'sv-foot', onsubmit: function (e) { e.preventDefault(); send(); } }, quick, ri, heart,
       h('button', { class: 'sv-ic', type: 'submit', 'aria-label': 'Envoyer' }, icon('send')));
   }
   root.replaceChildren(h('img', { class: 'sv-bg', src: s.img, alt: '' }), top, stage, foot);
@@ -997,16 +1217,24 @@ $('#th-in').addEventListener('input', function () {
 $('#th-form').addEventListener('submit', function (e) {
   e.preventDefault(); var inp = $('#th-in'), t = inp.value.trim(); if (!t || !S.openChat) return;
   inp.value = ''; lastTypingPing = 0;
-  sendMsg(S.openChat, { text: t }).then(function (ok) { if (!ok) inp.value = t; });
+  var q = S.quote; S.quote = null; renderQuote();
+  sendMsg(S.openChat, { text: t, quote: q ? q.id : undefined }).then(function (ok) { if (!ok) { inp.value = t; S.quote = q; renderQuote(); } });
 });
 $('#th-file').addEventListener('change', function () {
   var f = this.files[0]; this.value = ''; if (!f || !S.openChat) return;
   var chat = S.openChat; toast('Envoi de la photo…');
   shrink(f, 1440).then(function (img) { return sendMsg(chat, { image: img }); }, function () { toast('Cette image n’a pas pu être envoyée.'); });
 });
+$('#th-snap').addEventListener('change', function () {
+  var f = this.files[0]; this.value = ''; if (!f || !S.openChat) return;
+  var chat = S.openChat, name = chatTitle(chat);
+  shrink(f, 1280).then(function (img) { return sendMsg(chat, { image: img, once: true }); }, function () { toast('Cette image n’a pas pu être envoyée.'); return false; })
+    .then(function (ok) { if (ok) toast('Snap envoyé : ' + name + ' pourra le voir une seule fois'); });
+});
+$('#act-btn').addEventListener('click', openActivity);
 document.addEventListener('keydown', function (e) {
   if (SVs) { if (e.key === 'Escape') closeStory(); else if (document.activeElement.id !== 'sv-reply') { if (e.key === 'ArrowRight') nextStory(); else if (e.key === 'ArrowLeft') prevStory(); } return; }
-  if (e.key === 'Escape') { var v = $('.viewer'); if (v) v.remove(); else if (!$('#sheet').hidden) closeSheet(); else if (S.openChat) closeThread(); }
+  if (e.key === 'Escape') { var v = $('.viewer, .snapview'); if (v) v.click(); else if (!$('#sheet').hidden) closeSheet(); else if (S.openChat) closeThread(); }
 });
 setInterval(function () { if (S.me && !document.hidden && !SVs) { var a = document.activeElement; if (a && /INPUT|TEXTAREA/.test(a.tagName)) return; renderFeed(); renderChatList(); } }, 60000);
 
@@ -1023,6 +1251,13 @@ function connectEvents() {
   on('story', function (s) { upsert(S.stories, s, byOldest); if (!SVs) renderFeed(); });
   on('story-del', function (d) { S.stories = S.stories.filter(function (x) { return x.id !== d.id; }); if (!SVs) renderFeed(); });
   on('chat', function (c) { upsert(S.chats, c); if (S.openChat && S.openChat.id === c.id) { S.openChat = c; markRead(c.id); renderMsgs(); } renderChatList(); renderNav(); });
+  on('msgupd', function (d) {
+    if (!S.openChat || S.openChat.id !== d.chatId) return;
+    var i = S.msgs.findIndex(function (x) { return x.id === d.msg.id; }); if (i >= 0) { S.msgs[i] = d.msg; renderMsgs(); }
+  });
+  on('note', function (n) { setNote(n); });
+  on('score', function (d) { if (S.users[d.uid]) S.users[d.uid].score = d.score; if (d.uid === S.me.id) S.me.score = d.score; if (S.tab === 'profile') renderProfile(); });
+  on('activity', function (a) { S.activity.unshift(a); renderActDot(); if (S.sheet && S.sheet.type === 'activity') renderActivity(); });
   on('presence', function (d) { S.online = new Set(d.online || []); renderLight(); });
   on('typing', function (d) { var t = S.typing[d.chatId] = S.typing[d.chatId] || {}; t[d.by] = Date.now() + 4000; renderLight(); setTimeout(renderLight, 4100); });
   on('msg', function (d) {
@@ -1033,10 +1268,11 @@ function connectEvents() {
     else if (m.by !== S.me.id && !open) headsUp(d.chatId, m);
   });
 }
+function msgPreview(m) { return m.once ? '📸 T’a envoyé un snap' : m.reply === 'note' ? 'A répondu à ta note : ' + m.text : (m.text || '📷 Photo'); }
 function msgTitle(chatId, m) { var c = S.chats.find(function (x) { return x.id === chatId; }); return c && c.kind === 'group' ? 'Le salon · ' + who(m.by).name : who(m.by).name; }
 function notify(chatId, m) {
   if (!PREFS.notif || !('Notification' in window) || Notification.permission !== 'granted' || !swReg) return;
-  swReg.showNotification(msgTitle(chatId, m), { body: PREFS.preview ? (m.text || '📷 Photo') : 'Nouveau message', icon: 'icons/icon-192.png', badge: 'icons/favicon-32.png', tag: chatId, renotify: true, data: { chatId: chatId } }).catch(function () {});
+  swReg.showNotification(msgTitle(chatId, m), { body: PREFS.preview ? msgPreview(m) : 'Nouveau message', icon: 'icons/icon-192.png', badge: 'icons/favicon-32.png', tag: chatId, renotify: true, data: { chatId: chatId } }).catch(function () {});
 }
 // bandeau en haut de l'écran quand l'app est ouverte sur autre chose
 var huT = null;
@@ -1044,7 +1280,7 @@ function headsUp(chatId, m) {
   if (!PREFS.heads) return;
   var el = $('#hu'), c = visibleChats().find(function (x) { return x.id === chatId; });
   el.replaceChildren(h('button', { class: 'hu-in', type: 'button', onclick: function () { el.hidden = true; if (!c) return; if (SVs) closeStory(); closeSheet(); switchTab('chat'); openChat(c); } },
-    avatar(m.by, 40), h('span', { class: 't' }, h('b', { text: msgTitle(chatId, m) }), h('span', { text: PREFS.preview ? (m.text || '📷 Photo') : 'Nouveau message' }))));
+    avatar(m.by, 40), h('span', { class: 't' }, h('b', { text: msgTitle(chatId, m) }), h('span', { text: PREFS.preview ? msgPreview(m) : 'Nouveau message' }))));
   el.hidden = false; clearTimeout(huT); huT = setTimeout(function () { el.hidden = true; }, 4500);
   if (navigator.vibrate) navigator.vibrate(18);
 }

@@ -32,6 +32,17 @@ CE QU'IL Y A DANS L'APP
 - Bulle+ et Bulle Pro (gratuits en version test) : entrouvrir un message sans
   le marquer comme lu, thèmes exclusifs, voir qui a regardé tes snaps, statistiques
 
+Nouveautés v4 (idées reprises de Snapchat et Instagram) :
+- Flammes 🔥 : nombre de jours d'affilée où toi et un ami vous êtes écrit
+  (⏳ quand elle va s'éteindre avant minuit)
+- Notes : une petite phrase au-dessus de ton avatar dans Messages, 24 h
+- Snaps « vu une fois » en privé (bouton appareil photo rose dans une discussion)
+- Réactions aux messages : double-tap = ❤️, appui long = choix d'emoji, Répondre, Copier
+- Réactions rapides aux snaps (😂 😮 😍 😢 👏 🔥)
+- 7 filtres photo au moment de publier
+- Activité (cloche) : qui a aimé, commenté, regardé ce que tu publies
+- Score Bulle sur le profil, bouton « Inviter des amis »
+
 
 METTRE À JOUR LA VERSION EN LIGNE
 ---------------------------------

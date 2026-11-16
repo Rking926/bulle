@@ -60,6 +60,19 @@ Nouveautés v6 :
 - Bouton « À la une » en bas de ton snap du jour ; modifier, renommer, retirer
   un snap ou supprimer depuis la story à la une elle-même
 
+Nouveautés v7 : Moment Bulle
+- Une fois par jour, à une heure surprise (la même pour tout le monde, entre 10 h et 21 h),
+  alerte « C'est le Moment Bulle ! » : 2 minutes pour montrer ce que tu fais.
+- Appareil photo double : photo de ce que tu vois, puis selfie automatique en 3 s,
+  assemblés en une seule image (sur ordinateur : la webcam pour les deux).
+- Les Moments de tes amis restent floutés tant que tu n'as pas posté le tien.
+  Après 2 minutes tu peux encore poster, mais tes amis voient ton retard.
+- Réactions 😍 😂 😮 👍 🔥, carte en haut du Fil.
+- Pour essayer sans attendre : Paramètres → Notifications → « Déclencher un Moment
+  maintenant », ou le bouton « Essayer maintenant (test) » dans la carte.
+- Sans serveur, l'alerte ne sonne que si l'app est ouverte (ou en arrière-plan) au
+  bon moment ; sinon la carte t'attend dans le Fil.
+
 
 METTRE À JOUR LA VERSION EN LIGNE
 ---------------------------------

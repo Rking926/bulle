@@ -113,6 +113,7 @@ function applyState(st) {
   S.online = new Set(st.online || []);
   S.notes = st.notes || [];
   S.highlights = st.highlights || [];
+  setMoment(st.moment);
   S.activity = (st.activity || []).slice().sort(byNewest);
 }
 
@@ -125,7 +126,7 @@ var THEMES = [
   { id: 'soleil', name: 'Soleil', sw: ['#FFD8A1', '#1E1206'], plus: true },
   { id: 'encre', name: 'Encre', sw: ['#ECECEC', '#111111'], plus: true }
 ];
-var PREFS = Object.assign({ mode: 'auto', theme: 'bulle', notif: true, preview: true, heads: true }, LS.get('prefs', {}));
+var PREFS = Object.assign({ mode: 'auto', theme: 'bulle', notif: true, preview: true, heads: true, moment: true }, LS.get('prefs', {}));
 function savePrefs() { LS.set('prefs', PREFS); }
 var darkMQ = window.matchMedia('(prefers-color-scheme: dark)');
 function hasPlus() { return !!(S.me && (S.me.plan === 'plus' || S.me.plan === 'pro')); }
@@ -276,6 +277,161 @@ function ringAv(uid, size, withOnline) {
 function openStoriesOf(uid) { var gs = storyGroups(), i = gs.findIndex(function (g) { return g.uid === uid; }); if (i >= 0) openStories(gs, i); return i >= 0; }
 // un clic sur un avatar entouré ouvre le snap au lieu de l'action normale
 function storyTap(e) { var r = e.target.closest && e.target.closest('[data-story]'); if (!r) return false; e.preventDefault(); e.stopPropagation(); return openStoriesOf(r.getAttribute('data-story')); }
+/* ---------------- Moment Bulle : une fois par jour, à une heure surprise, 2 minutes pour poster ce que tu fais */
+var MOMENT = { st: null, base: 0, timer: 0, tick: 0, alerted: LS.get('momentAlerted', '') };
+function setMoment(m) {
+  if (!m) return; MOMENT.st = m; MOMENT.base = Date.now() - m.now; // écart d'horloge éventuel
+  clearTimeout(MOMENT.timer);
+  if (m.startsIn > 0 && m.startsIn < DAY) MOMENT.timer = setTimeout(function () { call('GET', '/api/moment').then(function (r) { setMoment(r.moment); renderFeed(); momentAlert(); }); }, m.startsIn + 400);
+  if (m.start && !m.mine && Date.now() - MOMENT.base < m.end && MOMENT.alerted !== m.day + m.start) momentAlert();
+  clearInterval(MOMENT.tick);
+  if (m.start && !m.mine) MOMENT.tick = setInterval(syncMomentClock, 1000);
+}
+function momentPhase() { var m = MOMENT.st; if (!m || !m.start) return 'wait'; if (m.mine) return 'done'; return Date.now() - MOMENT.base < m.end ? 'live' : 'late'; }
+function syncMomentClock() {
+  var el = $('#moment-clock'), m = MOMENT.st; if (!m || !m.start) return;
+  var left = m.end - (Date.now() - MOMENT.base);
+  if (!el || el.dataset.phase !== 'live') return;
+  if (left <= 0) { renderFeed(); return; }
+  el.textContent = fmtDur(left / 1000);
+  var l2 = $('#mo-left'); if (l2) l2.textContent = 'Vite, il reste ' + fmtDur(left / 1000) + ' !';
+}
+function momentAlert() {
+  var m = MOMENT.st; if (!m || !m.start || m.mine) return;
+  MOMENT.alerted = m.day + m.start; LS.set('momentAlerted', MOMENT.alerted);
+  if (!PREFS.moment) return;
+  if (navigator.vibrate) navigator.vibrate([60, 60, 60]);
+  var el = $('#hu');
+  el.replaceChildren(h('button', { class: 'hu-in mo-alert', type: 'button', onclick: function () { el.hidden = true; if (SVs) closeStory(); closeSheet(); if (S.openChat) closeThread(); switchTab('feed'); openMomentCam(); } },
+    h('span', { class: 'mo-bolt', text: '⚡' }), h('span', { class: 't' }, h('b', { text: 'C’est le Moment Bulle !' }), h('span', { text: '2 minutes pour montrer ce que tu fais' }))));
+  el.hidden = false; clearTimeout(huT); huT = setTimeout(function () { el.hidden = true; }, 9000);
+  if (document.hidden && 'Notification' in window && Notification.permission === 'granted' && swReg) swReg.showNotification('⚡ C’est le Moment Bulle !', { body: '2 minutes pour montrer ce que tu fais', icon: 'icons/icon-192.png', badge: 'icons/favicon-32.png', tag: 'moment', data: { moment: true } }).catch(function () {});
+  if (S.tab === 'feed') renderFeed();
+}
+function momentLate(n) { return n <= 0 ? 'à l’heure' : n < 60 ? n + ' min de retard' : Math.floor(n / 60) + ' h de retard'; }
+function momentCard() {
+  var m = MOMENT.st; if (!m) return null;
+  var ph = momentPhase(), card = h('section', { class: 'moment ' + ph, 'aria-label': 'Moment Bulle' });
+  var head = h('div', { class: 'mo-head' }, h('span', { class: 'mo-bolt', text: '⚡' }), h('div', { class: 'mo-t' }, h('b', { text: 'Moment Bulle' }),
+    h('small', { text: ph === 'wait' ? 'Aujourd’hui, à une heure surprise' : 'Aujourd’hui à ' + hhmm(m.start) + (m.test ? ' (essai)' : '') })));
+  card.append(head);
+  if (ph === 'wait') {
+    card.append(h('p', { text: 'Une fois par jour, tout le monde reçoit l’alerte en même temps : tu as 2 minutes pour montrer ce que tu fais, sans filtre. Tu vois les Moments de tes amis seulement après avoir posté le tien.' }),
+      h('div', { class: 'row' }, 'Notification' in window && Notification.permission === 'default' ? h('button', { class: 'btn small', type: 'button', onclick: enableNotifs }, icon('bell'), 'Être prévenu') : null,
+        h('button', { class: 'btn small', type: 'button', onclick: momentTest }, 'Essayer maintenant (test)')));
+    return card;
+  }
+  if (ph === 'live' || ph === 'late') {
+    head.append(ph === 'live' ? h('span', { class: 'mo-clock', id: 'moment-clock', 'data-phase': 'live', text: fmtDur((m.end - (Date.now() - MOMENT.base)) / 1000) }) : h('span', { class: 'mo-late', id: 'moment-clock', 'data-phase': 'late', text: 'en retard' }));
+    card.append(h('button', { class: 'btn primary block', type: 'button', onclick: openMomentCam }, icon('camera'), ph === 'live' ? 'Prendre mon Moment' : 'Poster mon Moment (en retard)'));
+  }
+  // Moments des amis : flous tant que tu n'as pas posté le tien
+  var strip = h('div', { class: 'mo-strip' });
+  if (m.mine) strip.append(momentTile(m.mine, true));
+  m.friends.forEach(function (f) { strip.append(momentTile(f, false)); });
+  if (!m.mine && !m.friends.length) strip.append(h('p', { class: 'hint', text: 'Personne n’a encore posté. Sois le premier !' }));
+  card.append(strip);
+  if (!m.mine && m.friends.length) card.append(h('p', { class: 'hint', text: m.friends.length + (m.friends.length > 1 ? ' amis ont' : ' ami a') + ' déjà posté. Poste ton Moment pour les voir.' }));
+  return card;
+}
+function momentTile(x, mine) {
+  var rx = Object.keys(x.reacts || {}), w = who(x.by);
+  return h('button', { class: 'mo-tile' + (x.locked ? ' locked' : ''), type: 'button', 'aria-label': (mine ? 'Ton Moment' : 'Moment de ' + w.name) + (x.locked ? ' (verrouillé)' : ''), onclick: function () { if (x.locked) { toast('Poste ton Moment pour voir celui de ' + w.name); openMomentCam(); } else openMoment(x); } },
+    x.locked ? h('span', { class: 'mo-lock' }, avatar(x.by, 44), h('span', { text: '🔒' })) : cachedImg('mo' + x.id, x.img, ''),
+    h('span', { class: 'mo-cap' }, h('b', { text: mine ? 'Toi' : w.name }), h('small', { text: momentLate(x.late) })),
+    rx.length && !x.locked ? h('span', { class: 'mo-rx', text: rx.slice(0, 3).map(function (u) { return x.reacts[u]; }).join('') + (rx.length > 3 ? ' +' + (rx.length - 3) : '') }) : null);
+}
+function openMoment(x) {
+  var w = who(x.by), mine = x.by === S.me.id, cur = (x.reacts || {})[S.me.id];
+  var rx = Object.keys(x.reacts || {});
+  openSheet(mine ? 'Ton Moment' : 'Moment de ' + w.name, h('div', { class: 'form' },
+    h('div', { class: 'mo-big' }, h('img', { src: x.img, alt: mine ? 'Ton Moment' : 'Moment de ' + w.name })),
+    h('p', { class: 'hint', text: hhmm(x.at) + ' · ' + momentLate(x.late) + (x.caption ? ' · « ' + x.caption + ' »' : '') }),
+    !mine ? h('div', { class: 'quick' }, ['😍', '😂', '😮', '👍', '🔥'].map(function (e) {
+      return h('button', { type: 'button', class: 'emo' + (cur === e ? ' on' : ''), 'aria-label': 'Réagir ' + e, onclick: function () {
+        attempt(call('POST', '/api/moment/' + x.id + '/react', { emoji: e })).then(function (r) { if (r) { setMoment(r.moment); renderFeed(); var nx = r.moment.friends.find(function (f) { return f.id === x.id; }); if (nx) openMoment(nx); } });
+      } }, e);
+    })) : null,
+    rx.length ? h('div', { class: 'rx-list' }, rx.map(function (u) { return h('div', { class: 'rx-row' }, avatar(u, 28), h('b', { text: u === S.me.id ? 'Toi' : who(u).name }), h('span', { text: x.reacts[u] })); })) : h('p', { class: 'hint', text: mine ? 'Pas encore de réaction.' : '' }),
+    !mine ? h('button', { class: 'btn', type: 'button', onclick: function () { openChat(dmFor(x.by)); switchTab('chat'); } }, icon('send'), 'Répondre à ' + w.name) : null));
+}
+function momentTest() { attempt(call('POST', '/api/moment/test'), null).then(function (r) { if (r) { MOMENT.alerted = ''; setMoment(r.moment); renderFeed(); } }); }
+
+// appareil photo double : photo principale (dos), puis selfie, assemblés comme une seule image
+function openMomentCam() {
+  var m = MOMENT.st; if (!m || !m.start) { toast('Le Moment Bulle n’a pas encore commencé.'); return; }
+  if (m.mine) { openMoment(m.mine); return; }
+  var st = { stream: null, step: 'back', back: null, selfie: null, busy: false };
+  var video = h('video', { class: 'cam-v', autoplay: true, muted: true, playsinline: true });
+  var label = h('p', { class: 'cam-l', text: 'Ouverture de l’appareil photo…' });
+  var shot = h('button', { class: 'cam-shot', type: 'button', 'aria-label': 'Prendre la photo' });
+  var pick = h('input', { type: 'file', accept: 'image/*', hidden: true });
+  var cap = h('input', { id: 'mo-cap', maxlength: '80', placeholder: 'Une légende ? (facultatif)', autocomplete: 'off' });
+  var stage = h('div', { class: 'cam' }, video, label);
+  var actions = h('div', { class: 'cam-acts' }, h('button', { class: 'btn small', type: 'button', onclick: function () { pick.click(); } }, icon('image'), 'Galerie'), shot);
+  function stop() { if (st.stream) st.stream.getTracks().forEach(function (t) { t.stop(); }); st.stream = null; }
+  function open(facing) {
+    stop();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return Promise.reject(new Error('no-cam'));
+    // si la caméra demandée n'existe pas (ordinateur), on prend celle qui est disponible
+    return navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1440 }, height: { ideal: 1920 } }, audio: false }).catch(function () { return navigator.mediaDevices.getUserMedia({ video: true, audio: false }); }).then(function (s) {
+      st.stream = s; video.srcObject = s; video.classList.toggle('mirror', facing === 'user');
+      return video.play().catch(function () {});
+    });
+  }
+  function grab(mirror) {
+    var vw = video.videoWidth, vh = video.videoHeight; if (!vw) return null;
+    var W = 1080, H = 1440, k = Math.max(W / vw, H / vh), c = document.createElement('canvas'); c.width = W; c.height = H;
+    var x = c.getContext('2d'); if (mirror) { x.translate(W, 0); x.scale(-1, 1); }
+    x.drawImage(video, (W - vw * k) / 2, (H - vh * k) / 2, vw * k, vh * k); return c;
+  }
+  function compose(main, selfie) {
+    var c = document.createElement('canvas'); c.width = 1080; c.height = 1440; var x = c.getContext('2d');
+    x.drawImage(main, 0, 0, 1080, 1440);
+    if (selfie) {
+      var r = function () { x.beginPath(); if (x.roundRect) x.roundRect(36, 36, 324, 432, 32); else x.rect(36, 36, 324, 432); };
+      x.save(); r(); x.clip(); x.drawImage(selfie, 36, 36, 324, 432); x.restore();
+      x.lineWidth = 7; x.strokeStyle = '#140D10'; r(); x.stroke();
+    }
+    return c.toDataURL('image/jpeg', 0.82);
+  }
+  function preview(url) {
+    stop(); st.result = url;
+    stage.replaceChildren(h('img', { class: 'cam-v', src: url, alt: 'Aperçu de ton Moment' }));
+    actions.replaceChildren(h('button', { class: 'btn', type: 'button', onclick: function () { st.back = null; st.selfie = null; stage.replaceChildren(video, label); actions.replaceChildren(h('button', { class: 'btn small', type: 'button', onclick: function () { pick.click(); } }, icon('image'), 'Galerie'), shot); begin(); } }, 'Reprendre'),
+      h('button', { class: 'btn primary', type: 'button', onclick: send }, icon('send'), 'Poster'));
+  }
+  function send(ev) {
+    var b = ev.currentTarget; b.disabled = true;
+    attempt(call('POST', '/api/moment', { image: st.result, caption: cap.value.trim() }), 'Moment posté ! Tu peux voir ceux de tes amis').then(function (r) {
+      b.disabled = false; if (r) { setMoment(r.moment); closeSheet(); switchTab('feed'); renderFeed(); }
+    });
+  }
+  shot.addEventListener('click', function () {
+    if (st.busy) return;
+    if (st.step === 'back') {
+      st.back = grab(false); if (!st.back) return;
+      if (navigator.vibrate) navigator.vibrate(20);
+      // puis le selfie, automatiquement, comme sur BeReal
+      st.step = 'selfie'; st.busy = true; label.textContent = 'Et maintenant, ton selfie…';
+      open('user').then(function () {
+        var n = 3; label.textContent = 'Selfie dans ' + n + '…';
+        var t = setInterval(function () { n--; if (n > 0) { label.textContent = 'Selfie dans ' + n + '…'; return; } clearInterval(t); st.selfie = grab(true); st.busy = false; preview(compose(st.back, st.selfie)); }, 700);
+      }, function (e) { console.warn('Selfie indisponible', e && e.name); st.busy = false; preview(compose(st.back, null)); });
+    }
+  });
+  pick.addEventListener('change', function () {
+    var f = pick.files[0]; pick.value = ''; if (!f) return;
+    shrink(f, 1440, 0.85).then(function (u) { var im = new Image(); im.onload = function () { var c = document.createElement('canvas'); c.width = 1080; c.height = 1440; var k = Math.max(1080 / im.width, 1440 / im.height); c.getContext('2d').drawImage(im, (1080 - im.width * k) / 2, (1440 - im.height * k) / 2, im.width * k, im.height * k); preview(compose(c, null)); }; im.src = u; });
+  });
+  function begin() {
+    st.step = 'back'; label.textContent = 'Montre ce que tu fais';
+    open('environment').catch(function () { label.textContent = 'Pas d’appareil photo disponible : choisis une photo dans ta galerie.'; shot.hidden = true; });
+  }
+  var ph = momentPhase();
+  openSheet('⚡ Moment Bulle', h('div', { class: 'form' }, h('p', { class: 'hint', id: 'mo-left', text: ph === 'live' ? 'Vite, le Moment est en cours !' : 'Tu es en retard : tes amis le verront.' }), stage, actions, pick, h('div', { class: 'field' }, cap)), { type: 'moment-cam', stop: stop });
+  begin();
+}
 function renderFeed() {
   var st = $('#stories'), box = $('#posts'); st.replaceChildren(); box.replaceChildren();
   var gs = storyGroups(), me = S.me.id, mine = gs.find(function (g) { return g.uid === me; });
@@ -285,6 +441,7 @@ function renderFeed() {
     if (g.uid === me) return;
     st.append(h('button', { class: 'st', type: 'button', 'aria-label': 'Snap de ' + who(g.uid).name + (g.close ? ' (amis proches)' : ''), onclick: function () { openStories(gs, i); } }, h('span', { class: 'ring ' + groupRing(g) }, avatar(g.uid, 60)), h('small', { text: who(g.uid).name })));
   });
+  var mc = momentCard(); if (mc) box.append(mc);
   if (!S.posts.length) {
     box.append(h('div', { class: 'empty' }, h('span', { class: 'logo xl' }), h('h2', { text: 'Le fil est tout neuf' }), h('p', { text: 'Publie la première photo, ou envoie un snap qui disparaît au bout de 24 h.' }),
       h('div', { class: 'row' }, h('button', { class: 'btn primary', type: 'button', onclick: function () { openComposer('post'); } }, 'Publier une photo'), h('button', { class: 'btn', type: 'button', onclick: function () { openComposer('snap'); } }, 'Envoyer un snap'))));
@@ -449,7 +606,7 @@ function openNote(n) {
 /* ---------------- activité (j'aime, commentaires, vues) */
 function actSeen() { return LS.get('actSeen.' + S.me.id, 0); }
 function renderActDot() { var d = $('#act-dot'); if (d) d.hidden = !S.activity.some(function (a) { return a.at > actSeen(); }); }
-var ACT = { like: 'a aimé ta photo.', comment: 'a commenté : ', view: 'a vu ton snap.' };
+var ACT = { like: 'a aimé ta photo.', comment: 'a commenté : ', view: 'a vu ton snap.', moment: 'a réagi à ton Moment Bulle ' };
 function openActivity() { openSheet('Activité', h('div', { id: 'act-list', class: 'act' }), { type: 'activity' }); renderActivity(); }
 function renderActivity() {
   var box = $('#act-list'); if (!box) return; box.replaceChildren();
@@ -847,6 +1004,8 @@ function renderSettings() {
       perm === 'denied' || perm === 'unsupported'),
     swRow('Aperçu du message', PREFS.preview, function (v) { PREFS.preview = v; savePrefs(); }, 'Sinon la notification dit juste « Nouveau message ».'),
     swRow('Bandeau dans l’app', PREFS.heads, function (v) { PREFS.heads = v; savePrefs(); }, 'Un bandeau en haut de l’écran quand un message arrive ailleurs.'),
+    swRow('Moment Bulle', PREFS.moment, function (v) { PREFS.moment = v; savePrefs(); }, 'L’alerte du jour à l’heure surprise. Tu as 2 minutes pour poster.'),
+    navRow('spark', 'Déclencher un Moment maintenant', function () { closeSheet(); switchTab('feed'); momentTest(); }, 'Version test : pour essayer sans attendre l’heure surprise'),
     notifOn ? navRow('bell', 'Tester une notification', function () { testNotif(); }) : null
   ], 'Version test : les notifications arrivent tant que Bulle est ouverte ou en arrière-plan. Quand l’app est complètement fermée, il faudra le serveur.');
 
@@ -1001,7 +1160,7 @@ function openSheet(title, body, state) {
     h('div', { class: 'sheet-h' }, h('h2', { text: title }), h('button', { class: 'iconbtn', type: 'button', 'aria-label': 'Fermer', onclick: closeSheet }, icon('close'))), body));
   sh.hidden = false; sh.onclick = function (e) { if (e.target === sh) closeSheet(); };
 }
-function closeSheet() { var sh = $('#sheet'); if (sh.hidden) return; sh.hidden = true; sh.replaceChildren(); S.sheet = null; }
+function closeSheet() { var sh = $('#sheet'); if (sh.hidden) return; if (S.sheet && S.sheet.stop) S.sheet.stop(); sh.hidden = true; sh.replaceChildren(); S.sheet = null; }
 function renderSheetDyn() {
   if (!S.sheet) return;
   if (S.sheet.type === 'comments') renderComments();
@@ -1532,6 +1691,7 @@ function connectEvents() {
     var i = S.msgs.findIndex(function (x) { return x.id === d.msg.id; }); if (i >= 0) { S.msgs[i] = d.msg; renderMsgs(); }
   });
   on('note', function (n) { setNote(n); });
+  on('moment', function (m) { var was = MOMENT.st && MOMENT.st.start; setMoment(m); if (!SVs) renderFeed(); if (m.start && !was) momentAlert(); });
   on('score', function (d) { if (S.users[d.uid]) S.users[d.uid].score = d.score; if (d.uid === S.me.id) S.me.score = d.score; if (S.tab === 'profile') renderProfile(); });
   on('activity', function (a) { S.activity.unshift(a); renderActDot(); if (S.sheet && S.sheet.type === 'activity') renderActivity(); });
   on('presence', function (d) { S.online = new Set(d.online || []); renderLight(); });
@@ -1582,6 +1742,7 @@ function start() {
     var q = new URLSearchParams(location.search), tabs = ['feed', 'map', 'chat', 'profile'];
     if (q.get('tab')) switchTab(tabs.indexOf(q.get('tab')) >= 0 ? q.get('tab') : 'feed');
     if (q.get('create')) openComposer(q.get('create') === 'snap' ? 'snap' : 'post');
+    if (q.get('moment')) { switchTab('feed'); openMomentCam(); }
     var cid = q.get('chat'); if (cid) { var c = visibleChats().find(function (x) { return x.id === cid; }); if (c) { switchTab('chat'); openChat(c); } }
     if (location.search) history.replaceState(null, '', location.pathname);
   }, function (e) {
@@ -1596,6 +1757,7 @@ window.addEventListener('appinstalled', function () { installEvt = null; toast('
 if ('serviceWorker' in navigator && window.isSecureContext) {
   navigator.serviceWorker.register('sw.js').then(function (reg) { swReg = reg; }).catch(function (e) { console.warn('Service worker', e); });
   navigator.serviceWorker.addEventListener('message', function (e) {
+    if (e.data && e.data.type === 'moment' && S.me) { if (S.openChat) closeThread(); switchTab('feed'); openMomentCam(); }
     if (e.data && e.data.type === 'open-chat' && S.me) { var c = visibleChats().find(function (x) { return x.id === e.data.chatId; }); if (c) { switchTab('chat'); openChat(c); } }
   });
 }

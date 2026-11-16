@@ -1,6 +1,6 @@
 /* Bulle (version test) — service worker : rend l'app installable et la fait marcher hors ligne.
    Chemins relatifs : marche à la racine d'un site comme dans un sous-dossier. */
-const VERSION = 'bulle-test-v6';
+const VERSION = 'bulle-test-v7';
 const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'local-api.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png', 'icons/logo-mask.png', 'cgu.html', 'confidentialite.html', 'legal.css'];
 
@@ -35,9 +35,9 @@ self.addEventListener('fetch', (e) => {
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  const chatId = e.notification.data && e.notification.data.chatId;
+  const chatId = e.notification.data && e.notification.data.chatId, moment = e.notification.data && e.notification.data.moment;
   e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
-    for (const c of list) { c.postMessage({ type: 'open-chat', chatId }); return c.focus(); }
-    return self.clients.openWindow('./?chat=' + encodeURIComponent(chatId || ''));
+    for (const c of list) { c.postMessage(moment ? { type: 'moment' } : { type: 'open-chat', chatId }); return c.focus(); }
+    return self.clients.openWindow(moment ? './?moment=1' : './?chat=' + encodeURIComponent(chatId || ''));
   }));
 });

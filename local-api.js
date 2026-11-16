@@ -168,6 +168,55 @@ function pushAct(type, by, extra) {
   db.activity.push(a); while (db.activity.length > 100) db.activity.shift();
   emit('activity', a);
 }
+/* ---------- Moment Bulle : une fois par jour, à une heure surprise (la même pour tout le monde), 2 minutes pour poster ---------- */
+var MOMENT_WIN = 2 * 6e4, momentTimers = {};
+function hashStr(s) { var n = 2166136261; for (var i = 0; i < s.length; i++) { n ^= s.charCodeAt(i); n = Math.imul(n, 16777619); } return n >>> 0; }
+function momentToday() {
+  var now = new Date(), k = dayKey(now), o = db.momentOverride && db.momentOverride[k];
+  if (o) return { day: k, start: o, test: true };
+  var r = rng(hashStr('bulle-moment-' + k)), d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10 + Math.floor(r() * 11), Math.floor(r() * 60));
+  return { day: k, start: d.getTime(), test: false };
+}
+function momentArt(seed) {
+  var r = rng(seed), C = ['#F6B6C8', '#140D10', '#D81B55', '#FFE1EA', '#B9DDF7', '#CDEBD3', '#FFD6A5'], p = function () { return C[Math.floor(r() * C.length)]; };
+  var main = artCanvas(seed, p(), p(), p(), 720, 960), selfie = artCanvas(seed + 7, p(), p(), p(), 216, 288), x = main.getContext('2d');
+  x.save(); x.beginPath(); if (x.roundRect) x.roundRect(24, 24, 216, 288, 22); else x.rect(24, 24, 216, 288); x.clip(); x.drawImage(selfie, 24, 24); x.restore();
+  x.lineWidth = 5; x.strokeStyle = '#140D10'; x.beginPath(); if (x.roundRect) x.roundRect(24, 24, 216, 288, 22); else x.rect(24, 24, 216, 288); x.stroke();
+  return main.toDataURL('image/jpeg', 0.8);
+}
+function outMoment(m, mt, viewer, unlocked) {
+  var open = unlocked || m.by === viewer;
+  return { id: m.id, by: m.by, at: m.at, late: Math.max(0, Math.round((m.at - mt.start - MOMENT_WIN) / 6e4)), caption: open ? (m.caption || '') : '', img: open ? m.image : '', locked: !open, reacts: m.reacts || {} };
+}
+// les contacts d'exemple postent leur Moment avec un peu de retard (quelques secondes quand c'est un Moment d'essai)
+function botMoments(mt) {
+  var day = (db.moments = db.moments || {})[mt.day] = (db.moments[mt.day] || {}), now = Date.now(), changed = false;
+  bots().forEach(function (b) {
+    if (day[b.id]) return;
+    var r = rng(hashStr(mt.day + b.id + (mt.test ? mt.start : ''))), late = r();
+    var delay = mt.test ? (4 + r() * 30) * 1e3 : late < 0.25 ? (60 + r() * 120) * 6e4 : (20 + r() * 900) * 1e3;
+    var post = function () {
+      var d2 = (db.moments || {})[mt.day]; if (!d2 || d2[b.id] || momentToday().start !== mt.start) return;
+      d2[b.id] = { id: rid(12), by: b.id, at: mt.start + delay, image: momentArt(hashStr(b.id + mt.day + mt.start)), caption: pick(['Rien de fou 😅', 'Pause café', 'En cours…', 'Vue du jour', '']), reacts: {} };
+      addScore(b.id, 5);
+    };
+    if (now >= mt.start + delay) { post(); changed = true; }
+    else if (!momentTimers[b.id + mt.start] && mt.start + delay - now < 6 * 36e5) {
+      momentTimers[b.id + mt.start] = setTimeout(function () { post(); save(); emit('moment', momentState(db.me)); }, mt.start + delay - now);
+    }
+  });
+  var ks = Object.keys(db.moments); if (ks.length > 7) ks.sort().slice(0, ks.length - 7).forEach(function (k) { delete db.moments[k]; });
+  return changed;
+}
+function momentState(uid) {
+  var mt = momentToday(); if (Date.now() >= mt.start && botMoments(mt)) save();
+  var day = (db.moments || {})[mt.day] || {}, mine = day[uid] || null, now = Date.now();
+  var before = now < mt.start;
+  // l'heure n'est pas donnée avant le déclenchement (seulement le délai, pour que l'app sonne au bon moment)
+  return { day: mt.day, start: before ? null : mt.start, end: before ? null : mt.start + MOMENT_WIN, startsIn: before ? mt.start - now : 0, test: mt.test, now: now,
+    mine: mine ? outMoment(mine, mt, uid, true) : null,
+    friends: before ? [] : Object.values(day).filter(function (m) { return m.by !== uid && db.users[m.by]; }).sort(function (a, b) { return a.at - b.at; }).map(function (m) { return outMoment(m, mt, uid, !!mine); }) };
+}
 function liveNotes() { var cut = Date.now() - DAY; return Object.values(db.notes || {}).filter(function (n) { return n.at > cut && db.users[n.by]; }); }
 function image(v) { if (typeof v !== 'string' || !/^data:image\/(jpeg|png|webp);base64,/.test(v)) throw fail(400, 'Image invalide.'); return v; }
 function me() { var u = db.me && db.users[db.me]; if (!u) throw fail(401, 'Crée ton profil pour commencer.'); return u; }
@@ -178,7 +227,8 @@ function canSee(c, uid) { return c.kind === 'group' || c.members.indexOf(uid) >=
 function rng(seed) { var s = seed >>> 0 || 1; return function () { s = Math.imul(s ^ (s >>> 15), s | 1); s ^= s + Math.imul(s ^ (s >>> 7), s | 61); return ((s ^ (s >>> 14)) >>> 0) / 4294967296; }; }
 function blobPath(cx, cy, r, n, rand) { var pts = []; for (var i = 0; i < n; i++) { var a = i / n * Math.PI * 2, rr = r * (0.62 + rand() * 0.62); pts.push([cx + Math.cos(a) * rr, cy + Math.sin(a) * rr]); } var f = function (v) { return v.toFixed(1); }; var pl = pts[n - 1], d = 'M' + f((pl[0] + pts[0][0]) / 2) + ' ' + f((pl[1] + pts[0][1]) / 2); for (var j = 0; j < n; j++) { var p = pts[j], q = pts[(j + 1) % n]; d += 'Q' + f(p[0]) + ' ' + f(p[1]) + ' ' + f((p[0] + q[0]) / 2) + ' ' + f((p[1] + q[1]) / 2); } return d + 'Z'; }
 // dessine une image d'exemple (formes rondes aux couleurs de Bulle) et la renvoie en JPEG
-function art(seed, bg, fg, ac, w, h) {
+function art(seed, bg, fg, ac, w, h) { return artCanvas(seed, bg, fg, ac, w, h).toDataURL('image/jpeg', 0.82); }
+function artCanvas(seed, bg, fg, ac, w, h) {
   w = w || 800; h = h || 1000; var r = rng(seed);
   var c = document.createElement('canvas'); c.width = w; c.height = h; var x = c.getContext('2d');
   x.fillStyle = bg; x.fillRect(0, 0, w, h);
@@ -186,7 +236,7 @@ function art(seed, bg, fg, ac, w, h) {
     x.fillStyle = b[0]; x.fill(new Path2D(blobPath(b[1], b[2], b[3], b[4], r)));
   });
   x.fillStyle = fg; x.beginPath(); x.arc(w * (0.1 + r() * 0.8), h * (0.1 + r() * 0.8), w * (0.025 + r() * 0.03), 0, Math.PI * 2); x.fill();
-  return c.toDataURL('image/jpeg', 0.82);
+  return c;
 }
 function seed(meId) {
   var now = Date.now(), M = 6e4, H = 36e5;
@@ -298,7 +348,7 @@ route('GET', '/api/state', function () {
     posts: Object.values(db.posts).sort(function (a, b) { return b.at - a.at; }).map(outPost),
     stories: Object.values(db.stories).filter(function (s) { return canSeeStory(s, u.id); }).sort(function (a, b) { return a.at - b.at; }).map(outStory),
     chats: Object.values(db.chats).filter(function (c) { return canSee(c, u.id); }).map(outChat),
-    online: online, notes: liveNotes(), activity: (db.activity || []).slice(-60), highlights: myHighlights(u.id)
+    online: online, moment: momentState(u.id), notes: liveNotes(), activity: (db.activity || []).slice(-60), highlights: myHighlights(u.id)
   };
 });
 route('PUT', '/api/profile', function (b) {
@@ -381,6 +431,35 @@ route('POST', '/api/stories', function (b) {
   return { story: outStory(s) };
 });
 route('DELETE', '/api/stories/([0-9a-f]{12})', function (b, id) { me(); delete db.stories[id]; save(); return { ok: true }; });
+route('GET', '/api/moment', function () { return { moment: momentState(me().id) }; });
+route('POST', '/api/moment', function (b) {
+  var u = me(), mt = momentToday();
+  if (Date.now() < mt.start) throw fail(400, 'Le Moment Bulle du jour n’a pas encore commencé. Tu seras prévenu !');
+  var day = (db.moments = db.moments || {})[mt.day] = (db.moments[mt.day] || {});
+  if (day[u.id]) throw fail(400, 'Tu as déjà posté ton Moment aujourd’hui.');
+  day[u.id] = { id: rid(12), by: u.id, at: Date.now(), image: image(b.image), caption: str(b.caption, 80), reacts: {} };
+  addScore(u.id, 5); save();
+  // les amis réagissent à ton Moment
+  bots().forEach(function (bt, i) {
+    if (Math.random() < 0.35) return;
+    setTimeout(function () { var m = ((db.moments || {})[mt.day] || {})[u.id]; if (!m) return; m.reacts[bt.id] = pick(['😍', '😂', '😮', '👍', '🔥']); save(); emit('moment', momentState(u.id)); pushAct('moment', bt.id, { text: m.reacts[bt.id] }); save(); }, 2500 + i * 2500 + Math.random() * 2000);
+  });
+  return { moment: momentState(u.id) };
+});
+route('POST', '/api/moment/([0-9a-f]{12})/react', function (b, id) {
+  var u = me(), mt = momentToday(), day = (db.moments || {})[mt.day] || {};
+  if (!day[u.id]) throw fail(403, 'Poste ton Moment pour voir et réagir à ceux de tes amis.');
+  var m = Object.values(day).find(function (x) { return x.id === id; }); if (!m) throw fail(404, 'Ce Moment n’existe plus.');
+  m.reacts = m.reacts || {};
+  if (['😍', '😂', '😮', '👍', '🔥'].indexOf(b.emoji) < 0 || m.reacts[u.id] === b.emoji) delete m.reacts[u.id]; else m.reacts[u.id] = b.emoji;
+  save(); return { moment: momentState(u.id) };
+});
+// version test : déclencher le Moment tout de suite (remplace l'heure surprise du jour)
+route('POST', '/api/moment/test', function () {
+  var u = me(), k = dayKey(Date.now()); db.momentOverride = {}; db.momentOverride[k] = Date.now();
+  if (db.moments && db.moments[k]) delete db.moments[k];
+  save(); var st = momentState(u.id); emit('moment', st); return { moment: st };
+});
 route('GET', '/api/archive', function () {
   var u = me(), all = Object.values(db.stories).concat(Object.values(db.archive || {}));
   return { stories: all.filter(function (s) { return s.by === u.id; }).sort(function (a, b) { return b.at - a.at; }).map(outStory) };

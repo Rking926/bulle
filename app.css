@@ -4,7 +4,7 @@
 :root{
   --bg:#F6B6C8; --surface:#F2A6BC; --raised:#FFE1EA; --fg:#140D10; --muted:#6A3F4C; --hot:#D81B55; --frame:#E9A0B6;
   --online:#1F9D5B; --scrim:rgba(20,13,16,.5);
-  --line:color-mix(in srgb,var(--fg) 14%,transparent); --ring:var(--fg); --ring-seen:color-mix(in srgb,var(--fg) 22%,transparent);
+  --line:color-mix(in srgb,var(--fg) 14%,transparent); --ring:linear-gradient(45deg,color-mix(in srgb,var(--hot) 55%,#FFB347) 0%,var(--hot) 50%,color-mix(in srgb,var(--hot) 60%,#8A3FFC) 100%); --ring-close:linear-gradient(45deg,#16C060 0%,#0FA97A 55%,#46DDA6 100%); --ring-seen:color-mix(in srgb,var(--fg) 22%,transparent);
   --mine-bg:var(--fg); --mine-fg:var(--raised);
   --display:"Bagel Fat One","Arial Rounded MT Bold","Trebuchet MS",system-ui,sans-serif;
   --body:"Figtree",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
@@ -93,11 +93,13 @@ p{margin:0}
 .stories::-webkit-scrollbar{display:none}
 .st{display:flex;flex-direction:column;align-items:center;gap:6px;width:74px;flex:none;background:none;border:0;padding:0;cursor:pointer}
 .st small{font-size:12px;font-weight:600;max-width:74px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ring{position:relative;width:70px;height:70px;display:grid;place-items:center;border-radius:var(--blob);background:var(--ring)}
+.ring{position:relative;width:var(--rs,76px);height:var(--rs,76px);flex:none;display:grid;place-items:center;border-radius:var(--blob);background:var(--ring)}
 .ring.seen{background:var(--ring-seen)}
 .ring.none{background:transparent;box-shadow:inset 0 0 0 2px var(--line)}
-.ring.live{animation:morph 7s ease-in-out infinite}
-.ring .av{--s:60px;box-shadow:0 0 0 3px var(--bg)}
+.ring.live,.ring.close{animation:morph 7s ease-in-out infinite}
+.ring.close{background:var(--ring-close)}
+.ring.sm .av{box-shadow:0 0 0 2px var(--bg)!important}
+.ring .av{box-shadow:0 0 0 3px var(--bg)}
 .ring .plus{position:absolute;right:-2px;bottom:-2px;width:24px;height:24px;border-radius:50%;background:var(--hot);color:#fff;display:grid;place-items:center;box-shadow:0 0 0 3px var(--bg)}
 .ring .plus svg{width:14px;height:14px;stroke-width:3.2}
 @keyframes morph{0%,100%{border-radius:47% 53% 42% 58% / 56% 44% 56% 44%}50%{border-radius:58% 42% 55% 45% / 44% 58% 42% 56%}}
@@ -189,7 +191,7 @@ p{margin:0}
 /* ---------- profil ---------- */
 .pf{display:flex;flex-direction:column;gap:16px;padding-block:14px}
 .pf-head{display:flex;align-items:center;gap:16px}
-.pf-av{padding:5px;border-radius:var(--blob);background:var(--ring);border:0;flex:none}
+.pf-av{padding:0;border-radius:var(--blob);background:none;border:0;flex:none;cursor:pointer}
 .pf-av.plain{background:transparent}
 .pf-av .av{box-shadow:0 0 0 4px var(--bg)}
 .pf-id{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
@@ -297,7 +299,7 @@ p{margin:0}
 .toast{position:absolute;left:50%;bottom:calc(84px + var(--sab));transform:translateX(-50%);z-index:90;background:var(--fg);color:var(--bg);padding:12px 18px;border-radius:999px;font-weight:700;font-size:14px;max-width:calc(100% - 32px);width:max-content;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.2)}
 
 @media (prefers-reduced-motion: reduce){
-  .ring.live,.dots i,.splash .logo{animation:none}
+  .ring.live,.ring.close,.dots i,.splash .logo{animation:none}
   .thread,.sheet,.sheet-card{animation:none}
   .burst{animation-duration:.01s}
 }
@@ -426,7 +428,7 @@ p{margin:0}
 .mk-wrap{background:none;border:0}
 .mk{display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;filter:drop-shadow(0 4px 8px rgba(0,0,0,.28))}
 .mk-ring{padding:3px;border-radius:var(--blob);background:var(--bg);display:grid;place-items:center}
-.mk-ring.live{background:var(--hot);animation:morph 7s ease-in-out infinite}
+.mk-ring.live{background:var(--ring);animation:morph 7s ease-in-out infinite}
 .mk-ring .av{box-shadow:0 0 0 2px var(--bg)}
 .mk-name{padding:2px 8px;border-radius:999px;background:var(--fg);color:var(--bg);font:800 12px/1.3 var(--body);white-space:nowrap}
 .mk.me .mk-ring{background:var(--fg)}
@@ -531,3 +533,52 @@ p{margin:0}
 .pf-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .pchip{display:inline-flex;align-items:center;padding:3px 10px;border-radius:12px;background:var(--raised);font-size:13px;font-weight:700;font-variant-numeric:tabular-nums}
 .pchip.note{font-weight:600;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
+
+/* ================================================================ v5 : messages vocaux, amis proches, contours de story partout */
+.th-form.rec>label,.th-form.rec>#th-in{display:none}
+.micbtn{color:var(--fg)}
+.recbar{flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:44px;padding-right:6px;border-radius:22px;background:var(--raised);border:2px solid var(--hot)}
+.recbar .iconbtn{width:40px;height:40px;color:var(--hot)}
+.rec-dot{width:10px;height:10px;border-radius:50%;background:#E5243B;flex:none;animation:recblink 1s ease-in-out infinite}
+@keyframes recblink{50%{opacity:.25}}
+.rec-time{font-weight:700;font-variant-numeric:tabular-nums;font-size:14px;flex:none;min-width:34px}
+.rec-wave{flex:1;min-width:0;height:26px;display:flex;align-items:center;justify-content:flex-end;gap:2px;overflow:hidden}
+.rec-wave i{width:3px;flex:none;border-radius:2px;background:var(--hot);min-height:3px}
+
+.voice{display:flex;align-items:center;gap:8px;padding:6px 12px 6px 6px;border-radius:22px;background:var(--raised);min-width:210px;max-width:100%;position:relative}
+.mrow.me .voice{background:var(--mine-bg);color:var(--mine-fg)}
+.vplay{width:36px;height:36px;border-radius:50%;border:0;display:grid;place-items:center;cursor:pointer;flex:none;background:var(--fg);color:var(--bg)}
+.mrow.me .vplay{background:var(--mine-fg);color:var(--mine-bg)}
+.vplay .ico svg{width:16px;height:16px}
+.vwave{flex:1;min-width:0;height:28px;display:flex;align-items:center;gap:2px;cursor:pointer}
+.vwave i{flex:1;max-width:4px;min-width:2px;border-radius:2px;background:currentColor;opacity:.35}
+.vwave i.on{opacity:1}
+.mrow.them .vwave i.on{background:var(--hot)}
+.vtime{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;min-width:30px;text-align:right;opacity:.85}
+.vspeed{display:none;border:0;border-radius:10px;padding:2px 6px;font:800 11px/1.4 var(--body);cursor:pointer;background:color-mix(in srgb,currentColor 18%,transparent);color:inherit}
+.voice.active .vspeed{display:inline-block}
+.voice.new::after{content:"";position:absolute;right:-4px;top:-2px;width:10px;height:10px;border-radius:50%;background:var(--hot);box-shadow:0 0 0 2px var(--bg)}
+
+/* contours de story dans les discussions, le fil, le profil */
+.crow .ring,.person .ring,.th-who .ring,.mav .ring,.pf-av .ring{cursor:pointer}
+.mav{display:inline-flex;flex:none;width:38px;justify-content:center;align-items:flex-end}
+.mrow .spacer{width:38px}
+.pf-av .ring .av{box-shadow:0 0 0 4px var(--bg)}
+
+/* amis proches */
+.aud{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.aud-row{display:flex;gap:8px}
+.aud-b{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;height:40px;border-radius:20px;border:2px solid var(--line);background:var(--raised);color:var(--fg);font-weight:700;cursor:pointer}
+.aud-b .ico svg{width:16px;height:16px}
+.aud-b[aria-checked="true"]{border-color:var(--fg);background:var(--fg);color:var(--bg)}
+.aud-b.close[aria-checked="true"]{border-color:#12B36A;background:#12B36A;color:#fff}
+.aud .linkish{align-self:flex-start}
+.cf .ppl-row{width:100%}
+.cf-check{width:28px;height:28px;border-radius:50%;border:2px solid var(--line);display:grid;place-items:center;flex:none;margin-left:auto}
+.cf-check.on{background:#12B36A;border-color:#12B36A;color:#fff}
+.cf-check .ico svg{width:15px;height:15px;fill:currentColor}
+.cf-btn.on{background:#12B36A;border-color:#12B36A;color:#fff}
+.cf-btn .ico svg,.cf-tag .ico svg{width:15px;height:15px}
+.cf-btn.on .ico svg{fill:currentColor}
+.cf-tag{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:#12B36A;color:#fff;font-size:12px;font-weight:700;flex:none}
+.cf-tag .ico svg{fill:currentColor;width:12px;height:12px}

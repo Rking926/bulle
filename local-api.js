@@ -52,17 +52,59 @@ var PRIVACY = { showOnline: true, readReceipts: true, ghost: false, dms: 'all' }
 function privacyOf(u) { var p = u.privacy || {}, o = {}; Object.keys(PRIVACY).forEach(function (k) { o[k] = p[k] == null ? PRIVACY[k] : p[k]; }); return o; }
 function pubUser(u) {
   var o = { id: u.id, handle: u.handle, name: u.name || u.handle, bio: u.bio || '', avatar: u.avatar || '', admin: u.id === db.me, bot: !!u.bot, plan: u.plan || 'free', score: u.score || 0 };
-  if (u.id === db.me) o.privacy = privacyOf(u); // réglages privés : seulement pour soi
+  if (u.id === db.me) { o.privacy = privacyOf(u); o.close = Object.keys(u.close || {}).filter(function (id) { return db.users[id]; }); } // réglages privés : seulement pour soi
   return o;
 }
 function outPost(p) { return { id: p.id, by: p.by, caption: p.caption, at: p.at, img: p.image, likes: Object.keys(p.likes || {}), comments: p.comments || [] }; }
 // les vues d'un snap ne sont renvoyées qu'à son auteur
-function outStory(s) { return { id: s.id, by: s.by, text: s.text, at: s.at, img: s.image, views: s.by === db.me ? Object.keys(s.views || {}) : [] }; }
+function outStory(s) { return { id: s.id, by: s.by, text: s.text, at: s.at, img: s.image, close: !!s.close, views: s.by === db.me ? Object.keys(s.views || {}) : [] }; }
+// un snap « amis proches » n'est visible que par les personnes de la liste de son auteur
+function canSeeStory(s, uid) { if (!s.close || s.by === uid) return true; var a = db.users[s.by]; return !!(a && a.close && a.close[uid]); }
+// ajoute aux comptes existants ce qui est apparu depuis (notes, snap « amis proches » d'Inès)
+function upgrade(meId) {
+  if (db.v5) return; db.v5 = true;
+  var now = Date.now(), ines = bots().find(function (b) { return b.handle === 'ines_b'; }), lou = bots().find(function (b) { return b.handle === 'lou.gr'; });
+  if (ines) {
+    ines.close = ines.close || {}; ines.close[meId] = true;
+    var id = rid(12); db.stories[id] = { id: id, by: ines.id, at: now - 35 * 6e4, text: 'Que pour vous ✨', image: art(106, '#CDEBD3', '#140D10', '#16C060', 720, 1280), close: true };
+  }
+  if (!db.notes && lou) { db.notes = {}; db.notes[lou.id] = { by: lou.id, text: 'Qui est chaud pour un ciné ce soir ? 🎬', at: now - 2 * 36e5 }; }
+}
 // un snap « vu une fois » n'envoie jamais son image dans la liste : il faut l'ouvrir (une seule fois)
 function outMsg(m) {
   var o = { id: m.id, by: m.by, at: m.at, text: m.text || '', img: m.once ? '' : (m.image || ''), reply: m.reply || null, ref: m.ref || '', quote: m.quote || null, reacts: m.reacts || {} };
   if (m.once) { o.once = true; o.opened = !!m.openedAt; }
+  if (m.audio) { o.audio = m.audio; o.dur = m.dur || 0; o.wave = m.wave || []; }
   return o;
+}
+// messages vocaux
+function audio(v) { if (typeof v !== 'string' || v.length > 4e6 || !/^data:audio\/[a-z0-9.+-]+(;[a-z0-9=.+-]+)*;base64,/i.test(v)) throw fail(400, 'Message vocal invalide.'); return v; }
+function cleanWave(w) { return Array.isArray(w) ? w.slice(0, 48).map(function (x) { x = +x; return x >= 0 && x <= 1 ? Math.round(x * 100) / 100 : 0; }) : []; }
+function durTxt(s) { s = Math.round(s); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+function msgLabel(m) { return m.once ? '📸 Snap' : m.audio ? '🎤 Message vocal (' + durTxt(m.dur) + ')' : m.text ? m.text.slice(0, 90) : 'Photo'; }
+// « voix » des contacts d'exemple : un petit fredonnement synthétisé, en WAV
+function fakeVoice(seed) {
+  var r = rng(seed), sr = 8000, secs = 2.2 + r() * 2.5, n = Math.floor(sr * secs), pcm = new Int16Array(n);
+  var f0 = 170 + r() * 90, sy = [], t = 0.15;
+  while (t < secs - 0.3) { var d = 0.12 + r() * 0.22; sy.push([t, d, 0.8 + r() * 0.5]); t += d + 0.04 + r() * (r() < 0.2 ? 0.35 : 0.08); }
+  var ph = 0, k = 0;
+  for (var i = 0; i < n; i++) {
+    var tt = i / sr, a = 0, p = f0;
+    while (k < sy.length - 1 && tt >= sy[k][0] + sy[k][1]) k++;
+    var s = sy[k]; if (s && tt >= s[0] && tt < s[0] + s[1]) { var x = (tt - s[0]) / s[1]; a = Math.sin(Math.PI * x); p = f0 * s[2] * (1 + 0.08 * Math.sin(x * 6)); }
+    ph += 2 * Math.PI * p / sr;
+    var v = a * (0.55 * Math.sin(ph) + 0.25 * Math.sin(2 * ph) + 0.12 * Math.sin(3 * ph) + 0.06 * Math.sin(5 * ph));
+    pcm[i] = Math.max(-1, Math.min(1, v * 0.7)) * 32767;
+  }
+  var B = 32, wave = [], seg = Math.floor(n / B);
+  for (var b = 0; b < B; b++) { var mx = 0; for (var j = b * seg; j < (b + 1) * seg; j += 8) mx = Math.max(mx, Math.abs(pcm[j]) / 32767); wave.push(Math.round(Math.min(1, mx / 0.7) * 100) / 100); }
+  var buf = new ArrayBuffer(44 + n * 2), dv = new DataView(buf), o = 0;
+  var w4 = function (s) { for (var q = 0; q < 4; q++) dv.setUint8(o++, s.charCodeAt(q)); }, u32 = function (x) { dv.setUint32(o, x, true); o += 4; }, u16 = function (x) { dv.setUint16(o, x, true); o += 2; };
+  w4('RIFF'); u32(36 + n * 2); w4('WAVE'); w4('fmt '); u32(16); u16(1); u16(1); u32(sr); u32(sr * 2); u16(2); u16(16); w4('data'); u32(n * 2);
+  for (var z = 0; z < n; z++) { dv.setInt16(o, pcm[z], true); o += 2; }
+  var bytes = new Uint8Array(buf), bin = '';
+  for (var c = 0; c < bytes.length; c += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(c, c + 0x8000));
+  return { audio: 'data:audio/wav;base64,' + btoa(bin), dur: Math.round(secs * 10) / 10, wave: wave };
 }
 // Flammes : nombre de jours d'affilée où les deux personnes se sont écrit
 function dayKey(t) { var d = new Date(t); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
@@ -163,11 +205,12 @@ function botReply(c, sent) {
   setTimeout(function () { emit('typing', { chatId: c.id, by: b.id }); }, 700);
   setTimeout(function () {
     var cur = db.chats[c.id]; if (!cur) return;
-    var snap = c.kind === 'dm' && Math.random() < 0.22, at = Date.now();
+    var at = Date.now(), voice = !!(sent && sent.audio) && Math.random() < 0.65, snap = !voice && c.kind === 'dm' && Math.random() < 0.22;
     var m = snap ? { id: rid(12), by: b.id, at: at, text: '', image: art(Math.floor(Math.random() * 1e6), pick(COLORS), pick(COLORS), pick(COLORS), 720, 1280), once: true }
-      : { id: rid(12), by: b.id, at: at, text: sent && sent.once ? pick(SNAP_LINES) : pick(LINES) };
+      : voice ? Object.assign({ id: rid(12), by: b.id, at: at, text: '' }, fakeVoice(Math.floor(Math.random() * 1e6)))
+      : { id: rid(12), by: b.id, at: at, text: sent && sent.once ? pick(SNAP_LINES) : sent && sent.audio ? pick(['J’adore ta voix 😂', 'Ok je t’écoute ce soir', 'Mdr ton vocal', 'Bien reçu !']) : pick(LINES) };
     (db.msgs[c.id] = db.msgs[c.id] || []).push(m);
-    cur.lastAt = m.at; cur.lastText = snap ? '📸 Snap' : m.text; cur.lastBy = b.id; markDay(cur, b.id, at); addScore(b.id, snap ? 3 : 1); save();
+    cur.lastAt = m.at; cur.lastText = msgLabel(m); cur.lastBy = b.id; markDay(cur, b.id, at); addScore(b.id, snap ? 3 : 1); save();
     emit('msg', { chatId: c.id, msg: outMsg(m) }); emit('chat', outChat(cur));
   }, 2400 + Math.random() * 1200);
 }
@@ -208,12 +251,13 @@ route('POST', '/api/login', register);
 route('POST', '/api/logout', function () { db = empty(); save(); return { ok: true }; });
 route('GET', '/api/state', function () {
   var u = me(), cut = Date.now() - DAY;
+  if (!db.v5) { upgrade(u.id); save(); }
   Object.values(db.stories).forEach(function (s) { if (s.at < cut) delete db.stories[s.id]; });
   var online = [u.id].concat(bots().filter(function (b) { return b.handle !== 'ines_b'; }).map(function (b) { return b.id; }));
   return {
     me: pubUser(u), users: Object.values(db.users).map(pubUser),
     posts: Object.values(db.posts).sort(function (a, b) { return b.at - a.at; }).map(outPost),
-    stories: Object.values(db.stories).sort(function (a, b) { return a.at - b.at; }).map(outStory),
+    stories: Object.values(db.stories).filter(function (s) { return canSeeStory(s, u.id); }).sort(function (a, b) { return a.at - b.at; }).map(outStory),
     chats: Object.values(db.chats).filter(function (c) { return canSee(c, u.id); }).map(outChat),
     online: online, notes: liveNotes(), activity: (db.activity || []).slice(-60)
   };
@@ -233,6 +277,7 @@ route('PUT', '/api/profile', function (b) {
   }
   // Version test : l'offre change sans paiement. Avec le serveur, seul le paiement confirmé pourra la changer.
   if (b.plan === 'free' || b.plan === 'plus' || b.plan === 'pro') u.plan = b.plan;
+  if (Array.isArray(b.close)) { u.close = {}; b.close.forEach(function (id) { if (typeof id === 'string' && db.users[id] && id !== u.id) u.close[id] = true; }); }
   save(); emit('user', pubUser(u)); return { me: pubUser(u) };
 });
 route('GET', '/api/export', function () {
@@ -284,11 +329,12 @@ route('DELETE', '/api/posts/([0-9a-f]{12})/comments/([0-9a-f]{10})', function (b
 });
 route('DELETE', '/api/posts/([0-9a-f]{12})', function (b, id) { me(); getPost(id); delete db.posts[id]; save(); return { ok: true }; });
 route('POST', '/api/stories', function (b) {
-  var u = me(); var s = { id: rid(12), by: u.id, text: str(b.text, 80), image: image(b.image), at: Date.now(), views: {} };
+  var u = me(); var s = { id: rid(12), by: u.id, text: str(b.text, 80), image: image(b.image), at: Date.now(), views: {}, close: !!b.close };
+  if (s.close && !Object.keys(u.close || {}).length) throw fail(400, 'Ta liste d’amis proches est vide : ajoute quelqu’un d’abord.');
   db.stories[s.id] = s; save();
-  // les contacts d'exemple regardent ton snap au bout de quelques secondes
+  // les contacts d'exemple regardent ton snap au bout de quelques secondes (seulement tes amis proches si c'est pour eux)
   bots().forEach(function (bt, i) {
-    if (Math.random() < 0.2) return;
+    if (!canSeeStory(s, bt.id) || Math.random() < 0.2) return;
     setTimeout(function () { var x = db.stories[s.id]; if (!x) return; x.views = x.views || {}; x.views[bt.id] = Date.now(); emit('story', outStory(x)); pushAct('view', bt.id, { story: s.id }); save(); }, 3000 + i * 4000 + Math.random() * 2500);
   });
   addScore(u.id, 5); save();
@@ -301,16 +347,18 @@ route('GET', '/api/chats/' + CHAT + '/messages', function (b, cid) {
 });
 route('POST', '/api/chats/' + CHAT + '/messages', function (b, cid) {
   var u = me(), c = resolveChat(cid, u.id, true); if (!c) throw fail(404, 'Discussion introuvable.');
-  var text = str(b.text, 2000), img = b.image ? image(b.image) : '';
-  if (!text && !img) throw fail(400, 'Le message est vide.');
+  var text = str(b.text, 2000), img = b.image ? image(b.image) : '', snd = b.audio ? audio(b.audio) : '';
+  if (snd) { text = ''; img = ''; }
+  if (!text && !img && !snd) throw fail(400, 'Le message est vide.');
   var list = (db.msgs[cid] = db.msgs[cid] || []);
   var reply = b.reply === 'snap' || b.reply === 'note' ? b.reply : null, once = !!(b.once && img && c.kind === 'dm');
   var qm = typeof b.quote === 'string' ? list.find(function (x) { return x.id === b.quote; }) : null;
   var m = { id: rid(12), by: u.id, at: Date.now(), text: once ? '' : text, image: img, reply: reply, ref: reply ? str(b.ref, 80) : '',
-    quote: qm ? { id: qm.id, by: qm.by, text: qm.once ? '📸 Snap' : (qm.text ? qm.text.slice(0, 80) : '📷 Photo') } : null };
+    quote: qm ? { id: qm.id, by: qm.by, text: qm.once ? '📸 Snap' : qm.audio ? '🎤 Message vocal' : (qm.text ? qm.text.slice(0, 80) : '📷 Photo') } : null };
   if (once) m.once = true;
+  if (snd) { m.audio = snd; m.dur = Math.max(0, Math.min(600, +b.dur || 0)); m.wave = cleanWave(b.wave); }
   list.push(m); while (list.length > 300) list.shift();
-  c.lastAt = m.at; c.lastText = once ? '📸 Snap' : text ? text.slice(0, 90) : 'Photo'; c.lastBy = u.id;
+  c.lastAt = m.at; c.lastText = msgLabel(m); c.lastBy = u.id;
   markDay(c, u.id, m.at); addScore(u.id, once ? 3 : 1); save();
   botReply(c, m);
   return { msg: outMsg(m), chat: outChat(c) };

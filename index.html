@@ -91,7 +91,13 @@ try{var p=JSON.parse(localStorage.getItem('bulle.prefs')||'{}'),m=p.mode||'auto'
         <label class="iconbtn" for="th-file" aria-label="Envoyer une photo"><span class="ico" data-ico="image"></span></label>
         <input type="file" id="th-file" accept="image/*" hidden>
         <input type="text" id="th-in" placeholder="Message…" maxlength="2000" aria-label="Message" enterkeyhint="send">
-        <button class="sendbtn" type="submit" aria-label="Envoyer"><span class="ico" data-ico="send"></span></button>
+        <div class="recbar" id="recbar" hidden>
+          <button class="iconbtn" type="button" id="rec-cancel" aria-label="Annuler le message vocal"><span class="ico" data-ico="trash"></span></button>
+          <span class="rec-dot" aria-hidden="true"></span><span class="rec-time" id="rec-time">0:00</span>
+          <span class="rec-wave" id="rec-wave" aria-hidden="true"></span>
+        </div>
+        <button class="iconbtn micbtn" type="button" id="th-mic" aria-label="Enregistrer un message vocal"><span class="ico" data-ico="mic"></span></button>
+        <button class="sendbtn" type="submit" id="th-send" aria-label="Envoyer" hidden><span class="ico" data-ico="send"></span></button>
       </form>
     </section>
   </div>

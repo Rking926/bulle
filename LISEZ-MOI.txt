@@ -43,6 +43,15 @@ Nouveautés v4 (idées reprises de Snapchat et Instagram) :
 - Activité (cloche) : qui a aimé, commenté, regardé ce que tu publies
 - Score Bulle sur le profil, bouton « Inviter des amis »
 
+Nouveautés v5 :
+- Messages vocaux : bouton micro dans une discussion (2 min max), lecture 1× / 1,5× / 2×,
+  les vocaux non écoutés s'enchaînent
+- Contour de snap partout (fil, Messages, notes, en-tête de discussion, profil, carte) :
+  coloré = pas encore vu, vert = amis proches, gris = déjà vu.
+  Un appui sur la photo entourée ouvre le snap.
+- Amis proches : bouton sur le profil d'un ami, liste dans Paramètres, et au moment
+  d'envoyer un snap « Tout le monde » ou « Amis proches »
+
 
 METTRE À JOUR LA VERSION EN LIGNE
 ---------------------------------

@@ -681,7 +681,7 @@ function renderMsgs() {
     if (group && !mine && first) box.append(h('div', { class: 'sender', text: who(m.by).name }));
     var col = h('div', { class: 'mcol' });
     if (m.reply === 'snap') col.append(h('span', { class: 'rtag', text: mine ? 'Tu as réagi à son snap' : 'A réagi à ton snap' }));
-    if (m.reply === 'note') col.append(h('span', { class: 'rtag', text: mine ? 'Tu as répondu à sa note' : 'A répondu à ta note' }), m.ref ? h('span', { class: 'quote note', text: m.ref }) : null);
+    if (m.reply === 'note') col.append(h('span', { class: 'rtag', text: mine ? 'Tu as répondu à sa note' : 'A répondu à ta note' }), m.ref ? h('span', { class: 'quote note', text: m.ref }) : '');
     if (m.quote) col.append(h('button', { class: 'quote', type: 'button', onclick: function () { var t = $('[data-mid="' + m.quote.id + '"]'); if (t) { t.scrollIntoView({ block: 'center', behavior: 'smooth' }); t.classList.add('flash'); setTimeout(function () { t.classList.remove('flash'); }, 1200); } } },
       h('b', { text: m.quote.by === me ? 'Toi' : who(m.quote.by).name }), h('span', { text: m.quote.text })));
     if (m.once) col.append(snapBubble(m, mine));
@@ -1241,15 +1241,194 @@ function applyFilter(src, fid, max, q) {
     im.src = src;
   });
 }
+/* ---------------- éditeur de snap : textes et stickers (déplacer, pincer pour agrandir/tourner, glisser vers la poubelle)
+   Tout est dessiné sur un canevas (même rendu à l'écran et dans l'image envoyée). Repère : 360 × 640. */
+var SED_COLORS = ['#FFFFFF', '#140D10', '#F6B6C8', '#D81B55', '#FFB347', '#FFE45C', '#4CD964', '#4AA8FF', '#8A3FFC'];
+var SED_EMOJI = ['😂', '😍', '🥹', '😎', '🤪', '😭', '🥳', '😴', '🤯', '🫶', '❤️', '🔥', '✨', '💫', '⭐', '🌈', '☀️', '🌙', '🌧️', '❄️', '🍕', '🍔', '🍟', '🧋', '☕', '🍦', '🎉', '🎧', '🎬', '📸', '⚽', '🏀', '🎮', '🚗', '✈️', '🏖️', '🐶', '🐱', '🌸', '💯', '👀', '💬', '🙌', '👍', '✌️', '💀'];
+var SED_MC = document.createElement('canvas').getContext('2d');
+function sedVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim() || 'sans-serif'; }
+function sedFont(it) {
+  var EMO = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+  var f = it.type === 'emoji' ? ['400', 64, EMO] : it.style === 'big' ? ['400', 34, sedVar('--display')] : it.style === 'bar' ? ['600', 17, sedVar('--body')] : it.style === 'tag' ? ['800', 19, sedVar('--body')] : ['800', 22, sedVar('--body')];
+  return { size: f[1], css: function (k) { return f[0] + ' ' + (f[1] * (k || 1)) + 'px ' + f[2]; } };
+}
+function sedLayout(it) {
+  var f = sedFont(it); SED_MC.font = f.css(1);
+  var maxW = it.type === 'emoji' ? 1e9 : it.style === 'bar' ? 330 : 290, lines = [];
+  String(it.text || '').split('\n').forEach(function (para) {
+    var cur = ''; para.split(' ').forEach(function (w) { var t = cur ? cur + ' ' + w : w; if (cur && SED_MC.measureText(t).width > maxW) { lines.push(cur); cur = w; } else cur = t; });
+    lines.push(cur);
+  });
+  var w = Math.max.apply(null, lines.map(function (l) { return SED_MC.measureText(l).width; }).concat([8]));
+  var box = it.style === 'pill' || it.style === 'tag', padX = box ? 14 : it.type === 'emoji' ? 2 : 6, padY = box ? 8 : 4, lh = f.size * (it.type === 'emoji' ? 1.1 : 1.2);
+  return { lines: lines, w: it.style === 'bar' ? 360 : w + padX * 2, h: lines.length * lh + padY * 2, lh: lh, padY: padY, font: f };
+}
+function sedInk(hex) { var n = parseInt(String(hex).slice(1), 16), r = n >> 16 & 255, g = n >> 8 & 255, b = n & 255; return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.62 ? '#140D10' : '#FFFFFF'; }
+function sedRound(x, X, Y, W, H, R) { x.beginPath(); if (x.roundRect) x.roundRect(X, Y, W, H, R); else x.rect(X, Y, W, H); }
+function sedDrawItem(x, it, W, H) {
+  var k = W / 360, L = sedLayout(it);
+  x.save(); x.textAlign = 'center'; x.textBaseline = 'middle'; x.font = L.font.css(1);
+  var ty = function (i) { return -L.h / 2 + L.padY + L.lh * (i + 0.5); };
+  if (it.style === 'bar') {
+    x.translate(0, it.y * H); x.scale(k, k);
+    x.fillStyle = 'rgba(0,0,0,.55)'; x.fillRect(0, -L.h / 2, 360, L.h); x.fillStyle = '#fff';
+    L.lines.forEach(function (l, i) { x.fillText(l, 180, ty(i)); }); x.restore(); return;
+  }
+  x.translate(it.x * W, it.y * H); x.rotate(it.rot || 0); x.scale((it.scale || 1) * k, (it.scale || 1) * k);
+  if (it.style === 'pill' || it.style === 'tag') {
+    var bg = it.style === 'tag' ? '#FFFFFF' : it.color; x.fillStyle = bg; sedRound(x, -L.w / 2, -L.h / 2, L.w, L.h, 14); x.fill();
+    x.fillStyle = it.style === 'tag' ? '#140D10' : sedInk(bg);
+  } else if (it.style === 'big') {
+    x.lineJoin = 'round'; x.lineWidth = 4; x.strokeStyle = 'rgba(0,0,0,.35)';
+    L.lines.forEach(function (l, i) { x.strokeText(l, 0, ty(i)); }); x.fillStyle = it.color;
+  } else x.fillStyle = '#000';
+  L.lines.forEach(function (l, i) { x.fillText(l, 0, ty(i)); });
+  x.restore();
+}
+function sedDraw(x, W, H, items, hide) { items.forEach(function (it) { if (it !== hide && it.text) sedDrawItem(x, it, W, H); }); }
+// image finale 9:16 (photo recadrée + textes et stickers)
+function renderSnap(src, items, W) {
+  W = W || 1080; var H = Math.round(W * 16 / 9);
+  return (document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(function () {
+    return new Promise(function (res, rej) {
+      var im = new Image(); im.onerror = rej;
+      im.onload = function () {
+        var c = document.createElement('canvas'); c.width = W; c.height = H; var x = c.getContext('2d'), k = Math.max(W / im.width, H / im.height);
+        x.fillStyle = '#000'; x.fillRect(0, 0, W, H); x.drawImage(im, (W - im.width * k) / 2, (H - im.height * k) / 2, im.width * k, im.height * k);
+        sedDraw(x, W, H, items); res(c.toDataURL('image/jpeg', 0.86));
+      };
+      im.src = src;
+    });
+  });
+}
+function openSnapEditor(src, items0, opts) {
+  opts = opts || {};
+  var items = (items0 || []).map(function (it) { return Object.assign({}, it); }), seq = 0, editing = null, hits = new Map();
+  items.forEach(function (it) { it.id = it.id || 'i' + (++seq); });
+  var cv = h('canvas', { class: 'sed-cv', 'aria-hidden': 'true' }), x = cv.getContext('2d');
+  var layer = h('div', { class: 'sed-hits' });
+  var stage = h('div', { class: 'sed-stage' }, h('img', { class: 'sed-bg', src: src, alt: '' }), cv, layer);
+  var trash = h('div', { class: 'sed-trash', hidden: true, 'aria-hidden': 'true' }, icon('trash'));
+  var tray = h('div', { class: 'sed-tray', hidden: true });
+  var editBox = h('div', { class: 'sed-edit', hidden: true });
+  var ov = h('div', { class: 'sed', role: 'dialog', 'aria-label': 'Ajouter du texte et des stickers' },
+    h('div', { class: 'sed-top' },
+      h('button', { class: 'sed-ic', type: 'button', 'aria-label': 'Annuler', onclick: function () { ov.remove(); window.removeEventListener('resize', size); } }, icon('close')),
+      h('span', { class: 'sed-hint', text: 'Glisse pour déplacer · pince pour agrandir et tourner' }),
+      h('button', { class: 'sed-ic tx', type: 'button', id: 'sed-text', 'aria-label': 'Ajouter du texte', onclick: function () { editText(null); } }, 'Aa'),
+      h('button', { class: 'sed-ic', type: 'button', id: 'sed-stick', 'aria-label': 'Ajouter un sticker', onclick: openTray }, '😀')),
+    stage, trash,
+    h('div', { class: 'sed-foot' }, h('button', { class: 'btn primary', type: 'button', id: 'sed-done', onclick: finish }, opts.done || 'Terminé')),
+    tray, editBox);
+  var W = 0, H = 0, dpr = Math.min(2, window.devicePixelRatio || 1);
+  function size() { var r = stage.getBoundingClientRect(); W = r.width; H = r.height; cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); draw(); }
+  function draw() { x.setTransform(dpr, 0, 0, dpr, 0, 0); x.clearRect(0, 0, W, H); sedDraw(x, W, H, items, editing); syncHits(); }
+  function syncHits() {
+    var k = W / 360;
+    hits.forEach(function (el, id) { if (!items.some(function (it) { return it.id === id; })) { el.remove(); hits.delete(id); } });
+    items.forEach(function (it, i) {
+      var el = hits.get(it.id); if (!el) { el = hitFor(it); hits.set(it.id, el); }
+      if (layer.children[i] !== el) layer.insertBefore(el, layer.children[i] || null); // ordre d'affichage = ordre de la liste
+      var L = sedLayout(it); el.hidden = it === editing; el.setAttribute('aria-label', it.type === 'emoji' ? 'Sticker ' + it.text : 'Texte : ' + it.text);
+      if (it.style === 'bar') el.style.cssText = 'left:0;top:' + it.y * H + 'px;width:100%;height:' + L.h * k + 'px;transform:translateY(-50%)';
+      else el.style.cssText = 'left:' + it.x * W + 'px;top:' + it.y * H + 'px;width:' + L.w * k + 'px;height:' + L.h * k + 'px;transform:translate(-50%,-50%) rotate(' + (it.rot || 0) + 'rad) scale(' + (it.scale || 1) + ')';
+    });
+  }
+  function hitFor(it) {
+    var el = h('div', { class: 'sed-hit', role: 'button', tabindex: '0', 'aria-label': it.type === 'emoji' ? 'Sticker ' + it.text : 'Texte : ' + it.text });
+    var P = new Map(), g = null, moved = false, t0 = 0;
+    function pts() { return Array.from(P.values()); }
+    function base() { var p = pts(); g = { x: it.x, y: it.y, scale: it.scale || 1, rot: it.rot || 0, p0: p[0] }; if (p.length > 1) { g.d0 = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]); g.a0 = Math.atan2(p[1][1] - p[0][1], p[1][0] - p[0][0]); } }
+    el.addEventListener('pointerdown', function (e) {
+      e.preventDefault(); e.stopPropagation();
+      if (!P.size) { moved = false; t0 = Date.now(); if (items[items.length - 1] !== it) { items.splice(items.indexOf(it), 1); items.push(it); draw(); } }
+      try { el.setPointerCapture(e.pointerId); } catch (er) { /* rien */ }
+      P.set(e.pointerId, [e.clientX, e.clientY]);
+      base();
+    });
+    el.addEventListener('pointermove', function (e) {
+      if (!P.has(e.pointerId)) return; P.set(e.pointerId, [e.clientX, e.clientY]); var p = pts();
+      if (p.length === 1) {
+        var dx = p[0][0] - g.p0[0], dy = p[0][1] - g.p0[1]; if (Math.abs(dx) + Math.abs(dy) > 6) moved = true; if (!moved) return;
+        it.x = Math.min(1, Math.max(0, g.x + dx / W)); it.y = Math.min(1, Math.max(0, g.y + dy / H));
+        trash.hidden = false; trash.classList.toggle('hot', overTrash(p[0]));
+      } else if (g.d0) {
+        moved = true; var d = Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]), a = Math.atan2(p[1][1] - p[0][1], p[1][0] - p[0][0]);
+        it.scale = Math.min(6, Math.max(0.3, g.scale * d / g.d0)); if (it.style !== 'bar') it.rot = g.rot + a - g.a0;
+      }
+      draw();
+    });
+    function up(e) {
+      if (!P.has(e.pointerId)) return; var last = P.get(e.pointerId); P.delete(e.pointerId);
+      if (P.size) { base(); return; }
+      var del = !trash.hidden && overTrash(last); trash.hidden = true; trash.classList.remove('hot');
+      if (del) { items.splice(items.indexOf(it), 1); if (navigator.vibrate) navigator.vibrate(15); }
+      else if (!moved && Date.now() - t0 < 350 && it.type === 'text' && it.style !== 'tag') { editText(it); return; }
+      draw();
+    }
+    el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
+    el.addEventListener('wheel', function (e) { e.preventDefault(); if (e.shiftKey) it.rot = (it.rot || 0) + e.deltaY * 0.004; else it.scale = Math.min(6, Math.max(0.3, (it.scale || 1) * Math.exp(-e.deltaY * 0.0015))); draw(); }, { passive: false });
+    el.addEventListener('keydown', function (e) { if (e.key === 'Delete' || e.key === 'Backspace') { items.splice(items.indexOf(it), 1); draw(); } else if (e.key === 'Enter' && it.type === 'text' && it.style !== 'tag') editText(it); });
+    return el;
+  }
+  function overTrash(p) { var r = trash.getBoundingClientRect(); return p[0] > r.left - 20 && p[0] < r.right + 20 && p[1] > r.top - 20 && p[1] < r.bottom + 20; }
+  function add(it) { it.id = 'i' + (++seq); it.x = it.x == null ? 0.5 : it.x; it.y = it.y == null ? 0.45 + (items.length % 4) * 0.04 : it.y; it.scale = it.scale || 1; it.rot = it.rot || 0; items.push(it); draw(); return it; }
+  // écrire / modifier un texte
+  var STYLES = [['big', 'Gros'], ['bar', 'Bandeau'], ['pill', 'Bulle']];
+  function editText(it) {
+    var cur = it || { type: 'text', text: '', color: '#FFFFFF', style: 'big' }, isNew = !it;
+    editing = it; draw(); tray.hidden = true;
+    var ta = h('textarea', { class: 'sed-ta', id: 'sed-ta', rows: '2', maxlength: '140', placeholder: 'Écris quelque chose…', 'aria-label': 'Texte' });
+    ta.value = cur.text;
+    function look() {
+      var bar = cur.style === 'bar', pill = cur.style === 'pill';
+      ta.style.cssText = 'font:' + sedFont(cur).css(W / 360) + ';color:' + (bar ? '#fff' : pill ? sedInk(cur.color) : cur.color) + ';background:' + (bar ? 'rgba(0,0,0,.55)' : pill ? cur.color : 'transparent') + ';width:' + (bar ? '100%' : '86%') + ';border-radius:' + (pill ? '14px' : '0');
+      styleBtn.textContent = STYLES.find(function (s) { return s[0] === cur.style; })[1];
+      $$('.sed-col', editBox).forEach(function (b) { b.setAttribute('aria-checked', String(b.dataset.c === cur.color)); });
+    }
+    var styleBtn = h('button', { class: 'sed-pill', type: 'button', 'aria-label': 'Changer le style du texte', onclick: function () { var i = STYLES.findIndex(function (s) { return s[0] === cur.style; }); cur.style = STYLES[(i + 1) % STYLES.length][0]; look(); ta.focus(); } });
+    function close(save) {
+      var t = ta.value.replace(/\s+$/, '').replace(/^\s+/, '');
+      editBox.hidden = true; editBox.replaceChildren(); editing = null;
+      if (save) { if (t) { cur.text = t; if (isNew) add(cur); } else if (!isNew) items.splice(items.indexOf(cur), 1); }
+      draw();
+    }
+    editBox.replaceChildren(
+      h('div', { class: 'sed-etop' }, styleBtn, h('button', { class: 'sed-pill ok', type: 'button', id: 'sed-ok', onclick: function () { close(true); } }, 'OK')),
+      ta,
+      h('div', { class: 'sed-cols', role: 'radiogroup', 'aria-label': 'Couleur' }, SED_COLORS.map(function (c) { return h('button', { class: 'sed-col', type: 'button', role: 'radio', 'data-c': c, style: 'background:' + c, 'aria-label': 'Couleur ' + c, onpointerdown: function (e) { e.preventDefault(); }, onclick: function () { cur.color = c; look(); } }); })));
+    editBox.hidden = false; look();
+    ta.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(false); });
+    setTimeout(function () { ta.focus(); }, 30);
+  }
+  // stickers : emoji + infos (heure, date, @mention)
+  function openTray() {
+    var d = new Date(), friends = Object.keys(S.users).filter(function (id) { return id !== S.me.id; });
+    function pickIt(it) { tray.hidden = true; add(it); }
+    tray.replaceChildren(
+      h('div', { class: 'sed-tray-h' }, h('b', { text: 'Stickers' }), h('button', { class: 'sed-ic', type: 'button', 'aria-label': 'Fermer', onclick: function () { tray.hidden = true; } }, icon('close'))),
+      h('div', { class: 'sed-tags' },
+        h('button', { type: 'button', class: 'sed-tag', onclick: function () { pickIt({ type: 'text', style: 'tag', text: '🕒 ' + hhmm(Date.now()) }); } }, '🕒 ' + hhmm(Date.now())),
+        h('button', { type: 'button', class: 'sed-tag', onclick: function () { pickIt({ type: 'text', style: 'tag', text: '📅 ' + d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }) }); } }, '📅 ' + d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })),
+        friends.map(function (id) { return h('button', { type: 'button', class: 'sed-tag', onclick: function () { pickIt({ type: 'text', style: 'tag', text: '@' + who(id).handle }); } }, '@' + who(id).handle); })),
+      h('div', { class: 'sed-emojis' }, SED_EMOJI.map(function (e) { return h('button', { type: 'button', class: 'sed-emo', 'aria-label': 'Sticker ' + e, onclick: function () { pickIt({ type: 'emoji', text: e }); } }, e); })));
+    tray.hidden = false;
+  }
+  function finish() { ov.remove(); window.removeEventListener('resize', size); if (opts.onDone) opts.onDone(items.map(function (it) { var o = Object.assign({}, it); delete o.id; return o; })); }
+  $('#phone').append(ov); window.addEventListener('resize', size);
+  requestAnimationFrame(size);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { if (W) draw(); });
+  return ov;
+}
 function openComposer(mode) {
-  var st = { mode: mode || 'post', file: null, url: null, base: null, shown: null, filter: 'none', thumbs: {} };
+  var st = { mode: mode || 'post', file: null, url: null, base: null, shown: null, filter: 'none', thumbs: {}, layers: [], prev: null };
   var frow = h('div', { class: 'filters', role: 'radiogroup', 'aria-label': 'Filtre' });
   function drawFilters() {
     frow.replaceChildren(); frow.hidden = !st.base;
     FILTERS.forEach(function (f) {
       frow.append(h('button', { type: 'button', role: 'radio', class: 'flt', 'aria-checked': String(st.filter === f.id), onclick: function () {
         st.filter = f.id; drawFilters();
-        applyFilter(st.base, f.id, 900, 0.8).then(function (u) { if (st.filter === f.id) { st.shown = u; sync(); } });
+        applyFilter(st.base, f.id, 900, 0.8).then(function (u) { if (st.filter === f.id) { st.shown = u; refreshPrev(); sync(); } });
       } }, h('span', { class: 'flt-im' }, st.thumbs[f.id] ? h('img', { src: st.thumbs[f.id], alt: '' }) : null), h('small', { text: f.name })));
     });
   }
@@ -1258,7 +1437,12 @@ function openComposer(mode) {
   var pick = h('input', { type: 'file', accept: 'image/*', id: 'cmp-pick', hidden: true });
   var cam = h('input', { type: 'file', accept: 'image/*', capture: 'environment', id: 'cmp-cam', hidden: true });
   var cap = h('textarea', { id: 'cmp-cap', rows: '3', maxlength: '2200', placeholder: 'Écris une légende…' });
-  var stx = h('input', { id: 'cmp-snap', maxlength: '80', placeholder: 'Texte sur la photo (facultatif)', autocomplete: 'off' });
+  // texte et stickers : éditeur plein écran, le rendu est incrusté dans l'image du snap
+  var edBtn = h('button', { class: 'btn small', type: 'button', id: 'cmp-edit', onclick: function () {
+    if (!st.shown) { toast('Choisis une photo d’abord.'); return; }
+    openSnapEditor(st.shown, st.layers, { done: 'Terminé', onDone: function (items) { st.layers = items; refreshPrev(); } });
+  } }, icon('edit'), 'Texte et stickers');
+  function refreshPrev() { if (!st.layers.length || !st.shown) { st.prev = null; sync(); return; } var src = st.shown; renderSnap(src, st.layers, 540).then(function (u) { if (st.shown === src) { st.prev = u; sync(); } }); }
   var capField = h('div', { class: 'field' }, h('label', { for: 'cmp-cap', text: 'Légende' }), cap);
   // public du snap : tout le monde, ou seulement tes amis proches (contour vert)
   var aud = h('div', { class: 'aud', role: 'radiogroup', 'aria-label': 'Qui peut voir ce snap' });
@@ -1268,40 +1452,40 @@ function openComposer(mode) {
       h('button', { type: 'button', role: 'radio', class: 'aud-b', 'aria-checked': String(!st.close), onclick: function () { st.close = false; drawAud(); } }, 'Tout le monde'),
       h('button', { type: 'button', role: 'radio', class: 'aud-b close', 'aria-checked': String(!!st.close), onclick: function () { if (!n) { st.pick = true; drawAud(); return; } st.close = true; drawAud(); } }, icon('star'), 'Amis proches' + (n ? ' (' + n + ')' : ''))),
       h('button', { type: 'button', class: 'linkish', onclick: function () { st.pick = !st.pick; drawAud(); } }, st.pick ? 'Fermer la liste' : n ? 'Modifier la liste' : 'Choisir mes amis proches'),
-      st.pick ? closePicker(function () { if (closeList().length && !st.close) st.close = true; drawAud(); }) : null);
+      st.pick ? closePicker(function () { if (closeList().length && !st.close) st.close = true; drawAud(); }) : '');
   }
   drawAud();
-  var snapField = h('div', { class: 'field' }, h('label', { for: 'cmp-snap', text: 'Texte du snap' }), stx, aud, h('span', { class: 'hint', text: 'Visible 24 h, puis il disparaît. Les amis proches voient un contour vert.' }));
+  var snapField = h('div', { class: 'field' }, edBtn, aud, h('span', { class: 'hint', text: 'Visible 24 h, puis il disparaît. Les amis proches voient un contour vert.' }));
   var go = h('button', { class: 'btn primary', type: 'submit' }, 'Partager');
   function setFile(f) {
     if (!f || !/^image\//.test(f.type)) { if (f) toast('Choisis une image (JPEG, PNG…).'); return; }
-    if (st.url) URL.revokeObjectURL(st.url); st.file = f; st.url = URL.createObjectURL(f); st.base = null; st.shown = null; st.filter = 'none'; st.thumbs = {}; sync(); drawFilters();
+    if (st.url) URL.revokeObjectURL(st.url); st.file = f; st.url = URL.createObjectURL(f); st.base = null; st.shown = null; st.prev = null; st.filter = 'none'; st.thumbs = {}; sync(); drawFilters();
     shrink(f, 900, 0.82).then(function (base) {
-      if (st.file !== f) return; st.base = base; st.shown = base; drawFilters();
+      if (st.file !== f) return; st.base = base; st.shown = base; drawFilters(); refreshPrev();
       FILTERS.forEach(function (x) { applyFilter(base, x.id, 120, 0.7).then(function (u) { if (st.file !== f) return; st.thumbs[x.id] = u; drawFilters(); }); });
     }).catch(function () {});
   }
   pick.addEventListener('change', function () { setFile(pick.files[0]); });
   cam.addEventListener('change', function () { setFile(cam.files[0]); });
-  stx.addEventListener('input', sync);
   drop.addEventListener('dragover', function (e) { e.preventDefault(); });
   drop.addEventListener('drop', function (e) { e.preventDefault(); setFile(e.dataTransfer.files[0]); });
   function sync() {
     seg.replaceChildren();
     [['post', 'Publication'], ['snap', 'Snap · 24 h']].forEach(function (m) { seg.append(h('button', { type: 'button', role: 'tab', 'aria-selected': String(st.mode === m[0]), onclick: function () { st.mode = m[0]; sync(); } }, m[1])); });
     drop.className = 'drop' + (st.mode === 'snap' ? ' snap' : '') + (st.url ? ' has' : ''); drop.replaceChildren();
-    if (st.url) { drop.append(h('img', { src: st.shown || st.url, alt: 'Aperçu' })); if (st.mode === 'snap' && stx.value.trim()) drop.append(h('div', { class: 'snapcap', text: stx.value.trim() })); }
+    if (st.url) { drop.append(h('img', { src: (st.mode === 'snap' && st.prev) || st.shown || st.url, alt: 'Aperçu' })); }
     else drop.append(h('span', { class: 'ph' }, icon('image'), h('span', { text: 'Choisis une photo' })));
+    edBtn.lastChild.textContent = st.layers.length ? 'Texte et stickers (' + st.layers.length + ')' : 'Texte et stickers';
     capField.hidden = st.mode !== 'post'; snapField.hidden = st.mode !== 'snap';
     go.textContent = st.mode === 'post' ? 'Partager' : 'Envoyer le snap';
   }
   var form = h('form', { class: 'form', onsubmit: function (e) {
     e.preventDefault(); if (!st.file) { toast('Choisis une photo d’abord.'); return; }
     go.disabled = true; var label = go.textContent; go.textContent = 'Envoi…';
-    shrink(st.file).then(function (img) { return st.filter === 'none' ? img : applyFilter(img, st.filter, 0, 0.84); }).then(function (img) {
+    shrink(st.file, st.mode === 'snap' ? 1440 : 0).then(function (img) { return st.filter === 'none' ? img : applyFilter(img, st.filter, 0, 0.84); }).then(function (img) { return st.mode === 'snap' && st.layers.length ? renderSnap(img, st.layers, 1080) : img; }).then(function (img) {
       return st.mode === 'post'
         ? attempt(call('POST', '/api/posts', { image: img, caption: cap.value.trim() }), 'Publié').then(function (r) { if (r) { upsert(S.posts, r.post, byNewest); } return r; })
-        : attempt(call('POST', '/api/stories', { image: img, text: stx.value.trim(), close: !!st.close }), st.close ? 'Snap envoyé à tes amis proches' : 'Snap envoyé · visible 24 h').then(function (r) { if (r) { upsert(S.stories, r.story, byOldest); } return r; });
+        : attempt(call('POST', '/api/stories', { image: img, text: '', close: !!st.close }), st.close ? 'Snap envoyé à tes amis proches' : 'Snap envoyé · visible 24 h').then(function (r) { if (r) { upsert(S.stories, r.story, byOldest); renderFeed(); } return r; });
     }, function () { toast('Cette image n’a pas pu être lue. Essaie un JPEG ou un PNG.'); return false; })
       .then(function (r) { go.disabled = false; go.textContent = label; if (r) { closeSheet(); if (S.openChat) closeThread(); switchTab('feed'); } });
   } }, seg, drop, frow, pick, cam, h('div', { class: 'pick-row' }, h('label', { class: 'btn small', for: 'cmp-pick' }, icon('image'), 'Galerie'), h('label', { class: 'btn small', for: 'cmp-cam' }, icon('camera'), 'Appareil photo')), capField, snapField, go);
@@ -1666,8 +1850,13 @@ $('#th-file').addEventListener('change', function () {
 $('#th-snap').addEventListener('change', function () {
   var f = this.files[0]; this.value = ''; if (!f || !S.openChat) return;
   var chat = S.openChat, name = chatTitle(chat);
-  shrink(f, 1280).then(function (img) { return sendMsg(chat, { image: img, once: true }); }, function () { toast('Cette image n’a pas pu être envoyée.'); return false; })
-    .then(function (ok) { if (ok) toast('Snap envoyé : ' + name + ' pourra le voir une seule fois'); });
+  // on peut ajouter du texte et des stickers avant d'envoyer
+  shrink(f, 1440).then(function (src) {
+    openSnapEditor(src, [], { done: 'Envoyer à ' + name, onDone: function (items) {
+      (items.length ? renderSnap(src, items, 1080) : Promise.resolve(src)).then(function (img) { return sendMsg(chat, { image: img, once: true }); })
+        .then(function (ok) { if (ok) toast('Snap envoyé : ' + name + ' pourra le voir une seule fois'); });
+    } });
+  }, function () { toast('Cette image n’a pas pu être envoyée.'); });
 });
 $('#act-btn').addEventListener('click', openActivity);
 document.addEventListener('keydown', function (e) {

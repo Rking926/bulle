@@ -1,6 +1,6 @@
 /* Bulle (version test) — service worker : rend l'app installable et la fait marcher hors ligne.
    Chemins relatifs : marche à la racine d'un site comme dans un sous-dossier. */
-const VERSION = 'bulle-test-v7';
+const VERSION = 'bulle-test-v8';
 const SHELL = ['./', 'index.html', 'app.css', 'app.js', 'local-api.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png', 'icons/favicon-32.png', 'icons/logo-mask.png', 'cgu.html', 'confidentialite.html', 'legal.css'];
 

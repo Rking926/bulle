@@ -70,6 +70,7 @@ Nouveautés v7 : Moment Bulle
 - Réactions 😍 😂 😮 👍 🔥, carte en haut du Fil.
 - Pour essayer sans attendre : Paramètres → Notifications → « Déclencher un Moment
   maintenant », ou le bouton « Essayer maintenant (test) » dans la carte.
+
 - Sans serveur, l'alerte ne sonne que si l'app est ouverte (ou en arrière-plan) au
   bon moment ; sinon la carte t'attend dans le Fil.
 
@@ -99,3 +100,13 @@ cgu.html              conditions d'utilisation
 confidentialite.html  politique de confidentialité
 legal.css             style de ces deux pages
 icons\                icônes faites à partir de ton logo
+
+Nouveautés v8 : texte et stickers sur les snaps
+- Créer → Snap → « Texte et stickers » (et aussi avant d'envoyer un snap privé
+  avec l'appareil photo rose d'une discussion).
+- « Aa » : écrire un texte, 9 couleurs, 3 styles (Gros, Bandeau façon Snapchat, Bulle).
+  Toucher un texte pour le modifier.
+- 😀 : 46 stickers emoji + heure, date et @mention d'un ami.
+- Glisser pour déplacer, pincer à deux doigts pour agrandir et tourner
+  (sur ordinateur : molette, Maj + molette pour tourner), glisser sur la poubelle
+  pour supprimer.

@@ -1,0 +1,54 @@
+BULLE — VERSION TEST (sans serveur)
+===================================
+
+Cette version n'a besoin d'aucun serveur ni d'aucun certificat.
+Tout est enregistré sur l'appareil lui-même : profil, photos, snaps, messages.
+Lou, Inès et Malo sont des contacts d'exemple : ils répondent à tes messages,
+likent et commentent tes photos, pour tester l'app comme si tu avais des amis dessus.
+
+Limite : deux appareils ne se voient pas entre eux (ton PC et ton téléphone ont
+chacun leurs propres données). Ça arrivera avec le serveur, plus tard.
+
+
+ESSAYER TOUT DE SUITE SUR LE PC
+-------------------------------
+Double-clique sur index.html : l'app s'ouvre dans ton navigateur et marche entièrement.
+(Ouverte comme ça, elle ne peut pas s'installer : voir ci-dessous.)
+
+
+L'INSTALLER SUR LE PC ET LE TÉLÉPHONE (gratuit)
+------------------------------------------------
+Pour s'installer comme une vraie application, l'app doit être ouverte depuis
+une adresse en https://. Un hébergeur gratuit de « site statique » suffit :
+il ne fait que stocker ces fichiers, ce n'est pas un serveur à payer.
+
+Exemple avec Netlify (gratuit) :
+1. Va sur https://app.netlify.com/drop
+2. Crée un compte gratuit.
+3. Glisse le dossier « app-test » entier dans la page.
+4. Netlify te donne une adresse du type https://quelque-chose.netlify.app
+
+Ensuite :
+- Sur le PC (Chrome ou Edge) : ouvre l'adresse → icône d'installation dans la
+  barre d'adresse, ou menu → Applications → Installer.
+- Sur le téléphone Android (Chrome) : ouvre l'adresse → menu ⋮ → Installer l'application.
+- Sur iPhone (Safari) : ouvre l'adresse → Partager → Sur l'écran d'accueil.
+
+Ce qui est envoyé à l'hébergeur : seulement les fichiers de l'app (code, styles, icônes).
+Tes photos et tes messages restent sur chaque appareil, jamais sur Internet.
+
+
+METTRE À JOUR L'APP
+-------------------
+Après une modification, glisse de nouveau le dossier dans Netlify (onglet « Deploys »).
+Les appareils récupèrent la nouvelle version à la réouverture suivante de l'app.
+
+
+CONTENU
+-------
+index.html            la page de l'app
+app.js / app.css      l'application (identique à la future version avec serveur)
+local-api.js          le « faux serveur » qui enregistre tout sur l'appareil
+sw.js                 service worker : installation et mode hors ligne
+manifest.webmanifest  nom, couleurs et icônes de l'app installée
+icons\                icônes faites à partir de ton logo

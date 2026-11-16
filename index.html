@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
+<title>Bulle</title>
+<meta name="description" content="Photos, snaps et messages entre amis.">
+<meta name="theme-color" content="#F6B6C8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#110B0D" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Bulle">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bagel+Fat+One&family=Figtree:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="app.css">
+<script src="local-api.js" defer></script>
+<script src="app.js" defer></script>
+</head>
+<body>
+<div class="phone" id="phone">
+
+  <!-- connexion -->
+  <section class="auth" id="auth" hidden>
+    <div class="auth-in">
+      <span class="logo xl"></span>
+      <h1 class="word big">bulle</h1>
+      <p class="auth-tag">Photos, snaps et messages entre amis.<br>Crée ton profil pour commencer.</p>
+      <form class="form" id="auth-form" autocomplete="off">
+        <div class="field"><label for="a-handle">Pseudo</label><input id="a-handle" name="handle" autocapitalize="none" spellcheck="false" maxlength="24" placeholder="ton.pseudo" required></div>
+        <div class="field"><label for="a-name">Nom affiché</label><input id="a-name" name="name" maxlength="40" placeholder="Facultatif"></div>
+        <p class="err" id="auth-err" role="alert" hidden></p>
+        <button class="btn primary" type="submit" id="auth-go">C’est parti</button>
+        <p class="hint" style="text-align:center">Version test : tout reste sur cet appareil.</p>
+      </form>
+    </div>
+  </section>
+
+  <!-- écran de chargement / hors ligne -->
+  <section class="splash" id="splash"><span class="logo xl"></span><p id="splash-msg"></p><button class="btn" type="button" id="splash-retry" hidden>Réessayer</button></section>
+
+  <!-- application -->
+  <div class="shell" id="shell" hidden>
+    <header class="top">
+      <button class="brand" type="button" id="brand"><span class="logo"></span><span class="word">bulle</span></button>
+      <div class="top-actions">
+        <button class="iconbtn" type="button" data-snap aria-label="Nouveau snap"><span class="ico" data-ico="camera"></span></button>
+        <button class="iconbtn" type="button" data-tab="chat" aria-label="Messages"><span class="ico" data-ico="send"></span><span class="badge" data-badge hidden></span></button>
+      </div>
+    </header>
+    <div class="banner" id="banner" hidden></div>
+    <main class="screen" id="screen">
+      <section id="v-feed" class="view" aria-label="Fil">
+        <div id="stories" class="stories" aria-label="Snaps"></div>
+        <div id="posts"></div>
+      </section>
+      <section id="v-chat" class="view" aria-label="Messages" hidden>
+        <div class="cl-head"><h2>Messages</h2><button class="iconbtn" type="button" id="newchat" aria-label="Nouveau message"><span class="ico" data-ico="edit"></span></button></div>
+        <div class="chatlist" id="chatlist"></div>
+      </section>
+      <section id="v-profile" class="view" aria-label="Profil" hidden><div id="profile"></div></section>
+    </main>
+    <nav class="tabs" aria-label="Navigation">
+      <button class="tab" data-tab="feed" type="button"><span class="ico" data-ico="home"></span>Fil</button>
+      <button class="tab" data-tab="chat" type="button"><span class="ico" data-ico="chat"></span>Messages<span class="badge" data-badge hidden></span></button>
+      <button class="fab" type="button" data-create aria-label="Créer"><span class="ico" data-ico="plus"></span></button>
+      <button class="tab" data-tab="profile" type="button"><span class="ico" data-ico="user"></span>Profil</button>
+    </nav>
+
+    <!-- discussion ouverte -->
+    <section class="thread" id="thread" hidden aria-label="Discussion">
+      <header class="th-head">
+        <button class="iconbtn" type="button" id="th-back" aria-label="Retour aux messages"><span class="ico" data-ico="back"></span></button>
+        <button class="th-who" type="button" id="th-who"></button>
+      </header>
+      <div class="msgs" id="msgs" aria-live="polite"></div>
+      <div class="typing" id="typing" hidden></div>
+      <form class="th-form" id="th-form" autocomplete="off">
+        <label class="iconbtn" for="th-file" aria-label="Envoyer une photo"><span class="ico" data-ico="image"></span></label>
+        <input type="file" id="th-file" accept="image/*" hidden>
+        <input type="text" id="th-in" placeholder="Message…" maxlength="2000" aria-label="Message" enterkeyhint="send">
+        <button class="sendbtn" type="submit" aria-label="Envoyer"><span class="ico" data-ico="send"></span></button>
+      </form>
+    </section>
+  </div>
+
+  <div id="sheet" class="sheet" hidden></div>
+  <div id="story" class="story" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+</div>
+</body>
+</html>

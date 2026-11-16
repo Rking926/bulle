@@ -62,13 +62,49 @@ function outStory(s) { return { id: s.id, by: s.by, text: s.text, at: s.at, img:
 function canSeeStory(s, uid) { if (!s.close || s.by === uid) return true; var a = db.users[s.by]; return !!(a && a.close && a.close[uid]); }
 // ajoute aux comptes existants ce qui est apparu depuis (notes, snap « amis proches » d'Inès)
 function upgrade(meId) {
-  if (db.v5) return; db.v5 = true;
-  var now = Date.now(), ines = bots().find(function (b) { return b.handle === 'ines_b'; }), lou = bots().find(function (b) { return b.handle === 'lou.gr'; });
-  if (ines) {
-    ines.close = ines.close || {}; ines.close[meId] = true;
-    var id = rid(12); db.stories[id] = { id: id, by: ines.id, at: now - 35 * 6e4, text: 'Que pour vous ✨', image: art(106, '#CDEBD3', '#140D10', '#16C060', 720, 1280), close: true };
+  var now = Date.now(), D = 864e5, bh = function (h) { return bots().find(function (b) { return b.handle === h; }); };
+  var ines = bh('ines_b'), lou = bh('lou.gr'), malo = bh('malo.wav');
+  if (!db.v5) {
+    db.v5 = true;
+    if (ines) {
+      ines.close = ines.close || {}; ines.close[meId] = true;
+      var id = rid(12); db.stories[id] = { id: id, by: ines.id, at: now - 35 * 6e4, text: 'Que pour vous ✨', image: art(106, '#CDEBD3', '#140D10', '#16C060', 720, 1280), close: true };
+    }
+    if (!db.notes && lou) { db.notes = {}; db.notes[lou.id] = { by: lou.id, text: 'Qui est chaud pour un ciné ce soir ? 🎬', at: now - 2 * 36e5 }; }
   }
-  if (!db.notes && lou) { db.notes = {}; db.notes[lou.id] = { by: lou.id, text: 'Qui est chaud pour un ciné ce soir ? 🎬', at: now - 2 * 36e5 }; }
+  if (!db.v6) {
+    db.v6 = true; db.highlights = db.highlights || {};
+    // stories « à la une » des contacts d'exemple
+    var hl = function (u, title, list) {
+      if (!u) return; var id = rid(12), items = list.map(function (x, i) { return { id: rid(12), img: art(x[0], x[1], x[2], x[3], 720, 1280), text: x[4] || '', at: now - x[5] * D + i * 6e4 }; });
+      db.highlights[id] = { id: id, by: u.id, title: title, items: items, cover: items[0].id, at: now - 3 * D };
+    };
+    hl(lou, 'Été ☀️', [[201, '#FFE1EA', '#D81B55', '#F6B6C8', 'Plage à 7 h', 120], [202, '#F6B6C8', '#140D10', '#FFE1EA', '', 118], [203, '#D81B55', '#FFE1EA', '#140D10', 'Dernier coucher de soleil', 110]]);
+    hl(lou, 'Argentique', [[211, '#140D10', '#F6B6C8', '#D81B55', 'Premier rouleau', 40], [212, '#FFE1EA', '#140D10', '#D81B55', '', 39]]);
+    hl(malo, 'Studio 🎧', [[221, '#140D10', '#D81B55', '#F6B6C8', 'Nouveau son bientôt', 20], [222, '#D81B55', '#140D10', '#FFE1EA', '', 12]]);
+    hl(ines, 'Lyon', [[231, '#FFE1EA', '#D81B55', '#140D10', 'Croix-Rousse', 30]]);
+  }
+}
+// Archive (tes snaps de plus de 24 h, gardés pour toi) et stories « à la une »
+function outHighlight(x, viewer) {
+  var a = db.users[x.by], items = x.items.filter(function (it) { return !it.close || x.by === viewer || !!(a && a.close && a.close[viewer]); });
+  if (!items.length) return null;
+  var cov = items.find(function (it) { return it.id === x.cover; }) || items[0];
+  return { id: x.id, by: x.by, title: x.title, at: x.at, cover: cov.id, coverImg: cov.img, items: items.map(function (it) { return { id: it.id, img: it.img, text: it.text, at: it.at, close: !!it.close }; }) };
+}
+function myHighlights(uid) { return Object.values(db.highlights || {}).sort(function (a, b) { return a.at - b.at; }).map(function (x) { return outHighlight(x, uid); }).filter(Boolean); }
+function hlItems(u, ids, keep) {
+  // reprend les éléments déjà à la une, sinon copie le snap (actif ou archivé) pour qu'il reste après 24 h
+  var out = [];
+  (Array.isArray(ids) ? ids : []).slice(0, 100).forEach(function (sid) {
+    if (typeof sid !== 'string' || out.some(function (o) { return o.id === sid; })) return;
+    var old = keep && keep.find(function (it) { return it.id === sid; });
+    var s = old ? null : (db.stories[sid] || (db.archive || {})[sid]);
+    if (old) out.push(old);
+    else if (s && s.by === u.id) out.push({ id: s.id, img: s.image, text: s.text || '', at: s.at, close: !!s.close });
+  });
+  if (!out.length) throw fail(400, 'Choisis au moins un snap.');
+  return out;
 }
 // un snap « vu une fois » n'envoie jamais son image dans la liste : il faut l'ouvrir (une seule fois)
 function outMsg(m) {
@@ -251,15 +287,18 @@ route('POST', '/api/login', register);
 route('POST', '/api/logout', function () { db = empty(); save(); return { ok: true }; });
 route('GET', '/api/state', function () {
   var u = me(), cut = Date.now() - DAY;
-  if (!db.v5) { upgrade(u.id); save(); }
-  Object.values(db.stories).forEach(function (s) { if (s.at < cut) delete db.stories[s.id]; });
+  if (!db.v6) { upgrade(u.id); save(); }
+  // un snap de plus de 24 h disparaît pour les autres, mais le tien est gardé dans ton archive
+  db.archive = db.archive || {};
+  Object.values(db.stories).forEach(function (s) { if (s.at < cut) { if (s.by === u.id) db.archive[s.id] = s; delete db.stories[s.id]; } });
+  var ar = Object.values(db.archive).sort(function (a, b) { return b.at - a.at; }); ar.slice(100).forEach(function (s) { delete db.archive[s.id]; });
   var online = [u.id].concat(bots().filter(function (b) { return b.handle !== 'ines_b'; }).map(function (b) { return b.id; }));
   return {
     me: pubUser(u), users: Object.values(db.users).map(pubUser),
     posts: Object.values(db.posts).sort(function (a, b) { return b.at - a.at; }).map(outPost),
     stories: Object.values(db.stories).filter(function (s) { return canSeeStory(s, u.id); }).sort(function (a, b) { return a.at - b.at; }).map(outStory),
     chats: Object.values(db.chats).filter(function (c) { return canSee(c, u.id); }).map(outChat),
-    online: online, notes: liveNotes(), activity: (db.activity || []).slice(-60)
+    online: online, notes: liveNotes(), activity: (db.activity || []).slice(-60), highlights: myHighlights(u.id)
   };
 });
 route('PUT', '/api/profile', function (b) {
@@ -289,7 +328,8 @@ route('GET', '/api/export', function () {
     stories: Object.values(db.stories).filter(function (s) { return s.by === u.id; }).map(outStory),
     chats: Object.values(db.chats).filter(function (c) { return canSee(c, u.id); }).map(function (c) { return { chat: outChat(c), messages: (db.msgs[c.id] || []).map(outMsg) }; }),
     location: (db.places && db.places[u.id]) || null,
-    note: (db.notes && db.notes[u.id]) || null
+    note: (db.notes && db.notes[u.id]) || null,
+    highlights: myHighlights(u.id).filter(function (x) { return x.by === u.id; })
   };
 });
 // Carte : enregistre ta position (sauf en mode fantôme) et renvoie celle de tes amis
@@ -341,6 +381,29 @@ route('POST', '/api/stories', function (b) {
   return { story: outStory(s) };
 });
 route('DELETE', '/api/stories/([0-9a-f]{12})', function (b, id) { me(); delete db.stories[id]; save(); return { ok: true }; });
+route('GET', '/api/archive', function () {
+  var u = me(), all = Object.values(db.stories).concat(Object.values(db.archive || {}));
+  return { stories: all.filter(function (s) { return s.by === u.id; }).sort(function (a, b) { return b.at - a.at; }).map(outStory) };
+});
+route('POST', '/api/highlights', function (b) {
+  var u = me(), items = hlItems(u, b.items), id = rid(12);
+  db.highlights = db.highlights || {};
+  if (Object.values(db.highlights).filter(function (x) { return x.by === u.id; }).length >= 30) throw fail(400, '30 stories à la une maximum.');
+  db.highlights[id] = { id: id, by: u.id, title: str(b.title, 20) || 'À la une', items: items, cover: items.some(function (it) { return it.id === b.cover; }) ? b.cover : items[0].id, at: Date.now() };
+  save(); return { highlight: outHighlight(db.highlights[id], u.id) };
+});
+route('PUT', '/api/highlights/([0-9a-f]{12})', function (b, id) {
+  var u = me(), x = (db.highlights || {})[id]; if (!x || x.by !== u.id) throw fail(404, 'Cette story à la une n’existe plus.');
+  if (typeof b.title === 'string') x.title = str(b.title, 20) || 'À la une';
+  if (Array.isArray(b.items)) x.items = hlItems(u, b.items, x.items);
+  if (typeof b.cover === 'string' && x.items.some(function (it) { return it.id === b.cover; })) x.cover = b.cover;
+  if (!x.items.some(function (it) { return it.id === x.cover; })) x.cover = x.items[0].id;
+  save(); return { highlight: outHighlight(x, u.id) };
+});
+route('DELETE', '/api/highlights/([0-9a-f]{12})', function (b, id) {
+  var u = me(), x = (db.highlights || {})[id]; if (!x || x.by !== u.id) throw fail(404, 'Cette story à la une n’existe plus.');
+  delete db.highlights[id]; save(); return { ok: true };
+});
 route('GET', '/api/chats/' + CHAT + '/messages', function (b, cid) {
   var u = me(), c = resolveChat(cid, u.id, false); if (!c) throw fail(404, 'Discussion introuvable.');
   return { chat: outChat(c), messages: (db.msgs[cid] || []).slice(-200).map(outMsg) };

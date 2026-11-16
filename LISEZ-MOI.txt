@@ -52,6 +52,14 @@ Nouveautés v5 :
 - Amis proches : bouton sur le profil d'un ami, liste dans Paramètres, et au moment
   d'envoyer un snap « Tout le monde » ou « Amis proches »
 
+Nouveautés v6 :
+- À la une : sur ton profil, « Nouveau » pour regrouper tes snaps sous un nom
+  (Vacances, Potes…) avec la couverture de ton choix. Ils restent après 24 h.
+- Archive : tes snaps de plus de 24 h sont gardés pour toi seul (100 derniers),
+  pour pouvoir les mettre à la une plus tard
+- Bouton « À la une » en bas de ton snap du jour ; modifier, renommer, retirer
+  un snap ou supprimer depuis la story à la une elle-même
+
 
 METTRE À JOUR LA VERSION EN LIGNE
 ---------------------------------

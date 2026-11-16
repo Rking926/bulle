@@ -112,6 +112,7 @@ function applyState(st) {
   S.chats = st.chats;
   S.online = new Set(st.online || []);
   S.notes = st.notes || [];
+  S.highlights = st.highlights || [];
   S.activity = (st.activity || []).slice().sort(byNewest);
 }
 
@@ -765,6 +766,7 @@ function renderProfile() {
   if (mine) pf.append(h('div', { class: 'pf-acts' }, h('button', { class: 'btn', type: 'button', onclick: editProfile }, icon('edit'), 'Modifier'), h('button', { class: 'btn primary', type: 'button', onclick: function () { openComposer('post'); } }, icon('plus'), 'Publier')));
   else pf.append(h('div', { class: 'pf-acts' }, h('button', { class: 'btn primary', type: 'button', onclick: function () { openChat(dmFor(uid)); } }, icon('send'), 'Envoyer un message'),
     h('button', { class: 'btn cf-btn' + (isClose(uid) ? ' on' : ''), type: 'button', 'aria-pressed': String(isClose(uid)), onclick: function () { toggleClose(uid); } }, icon('star'), isClose(uid) ? 'Ami proche' : 'Amis proches')));
+  pf.append(highlightRow(uid, mine));
   if (posts.length) pf.append(h('div', { class: 'grid' }, posts.map(function (p) { return h('button', { type: 'button', 'aria-label': 'Ouvrir la publication', onclick: function () { openPost(p.id); } }, cachedImg('g' + p.id, p.img, '')); })));
   else pf.append(h('p', { class: 'muted', style: 'color:var(--muted)', text: mine ? 'Tes photos apparaîtront ici.' : 'Aucune publication pour le moment.' }));
   if (mine) {
@@ -1144,11 +1146,99 @@ function openComposer(mode) {
   sync(); drawFilters(); openSheet('Créer', form);
 }
 
+/* ---------------- stories à la une (sur le profil, elles restent après 24 h) */
+function hlOf(uid) { return (S.highlights || []).filter(function (x) { return x.by === uid; }); }
+function setHighlight(id, hl) {
+  S.highlights = (S.highlights || []).filter(function (x) { return x.id !== id; });
+  if (hl) { S.highlights.push(hl); S.highlights.sort(byOldest); }
+  if (S.tab === 'profile') renderProfile();
+}
+function highlightRow(uid, mine) {
+  var list = hlOf(uid); if (!list.length && !mine) return null;
+  var row = h('div', { class: 'hl-row', role: 'list', 'aria-label': 'À la une' });
+  if (mine) row.append(h('button', { class: 'hl new', type: 'button', role: 'listitem', onclick: function () { editHighlight(null); } }, h('span', { class: 'hl-c' }, icon('plus')), h('small', { text: 'Nouveau' })));
+  list.forEach(function (x) {
+    row.append(h('button', { class: 'hl', type: 'button', role: 'listitem', 'aria-label': 'À la une : ' + x.title + ' (' + x.items.length + ' snaps)', onclick: function () { openHighlight(x); } },
+      h('span', { class: 'hl-c' }, cachedImg('hl' + x.id, x.coverImg, '')), h('small', { text: x.title })));
+  });
+  if (mine && !list.length) row.append(h('p', { class: 'hl-tip', text: 'Garde tes meilleurs snaps sur ton profil, même après 24 h.' }));
+  return row;
+}
+function openHighlight(x, start) {
+  var items = x.items.map(function (it) { return { id: it.id, by: x.by, text: it.text, at: it.at, img: it.img, close: it.close, views: [] }; });
+  openStories([{ uid: x.by, items: items, hl: x, start: start || 0, unseen: false }], 0);
+}
+// choisir où mettre un snap : une story à la une existante, ou une nouvelle
+function addToHighlight(sid) {
+  var list = hlOf(S.me.id);
+  if (!list.length) { editHighlight(null, sid); return; }
+  openSheet('Ajouter à la une', h('div', { class: 'form' },
+    h('div', { class: 'hl-row big' }, h('button', { class: 'hl new', type: 'button', onclick: function () { editHighlight(null, sid); } }, h('span', { class: 'hl-c' }, icon('plus')), h('small', { text: 'Nouveau' })),
+      list.map(function (x) {
+        var has = x.items.some(function (it) { return it.id === sid; });
+        return h('button', { class: 'hl' + (has ? ' on' : ''), type: 'button', 'aria-pressed': String(has), onclick: function () {
+          if (has) { toast('Ce snap est déjà dans « ' + x.title + ' »'); return; }
+          attempt(call('PUT', '/api/highlights/' + x.id, { items: x.items.map(function (it) { return it.id; }).concat([sid]) }), 'Ajouté à « ' + x.title + ' »').then(function (r) { if (r) { setHighlight(x.id, r.highlight); closeSheet(); } });
+        } }, h('span', { class: 'hl-c' }, cachedImg('hl' + x.id, x.coverImg, '')), h('small', { text: x.title }));
+      })),
+    h('p', { class: 'hint', text: 'Les snaps à la une restent sur ton profil après 24 h. Tu peux les retirer quand tu veux.' })));
+}
+function editHighlight(hl, preselect) {
+  var st = { title: hl ? hl.title : '', sel: hl ? hl.items.map(function (it) { return it.id; }) : (preselect ? [preselect] : []), cover: hl ? hl.cover : preselect || null, opts: [], loading: true };
+  var title = h('input', { id: 'hl-title', maxlength: '20', placeholder: 'Nom (ex. Vacances, Potes, 2026…)', autocomplete: 'off', value: st.title });
+  var grid = h('div', { class: 'hl-grid' }, h('p', { class: 'hint', text: 'Chargement de tes snaps…' }));
+  var coverRow = h('div', { class: 'hl-covers' });
+  var go = h('button', { class: 'btn primary', type: 'submit' }, hl ? 'Enregistrer' : 'Ajouter à mon profil');
+  function draw() {
+    grid.replaceChildren(); go.disabled = !st.sel.length;
+    if (st.loading) { grid.append(h('p', { class: 'hint', text: 'Chargement de tes snaps…' })); return; }
+    if (!st.opts.length) { grid.append(h('div', { class: 'empty' }, h('p', { text: 'Tu n’as encore publié aucun snap. Publie-en un : il pourra rester à la une après 24 h.' }), h('button', { class: 'btn', type: 'button', onclick: function () { openComposer('snap'); } }, icon('camera'), 'Envoyer un snap'))); }
+    st.opts.forEach(function (o) {
+      var n = st.sel.indexOf(o.id);
+      grid.append(h('button', { class: 'hl-pick' + (n >= 0 ? ' on' : ''), type: 'button', role: 'checkbox', 'aria-checked': String(n >= 0), 'aria-label': 'Snap du ' + new Date(o.at).toLocaleDateString('fr-FR'), onclick: function () {
+        if (n >= 0) st.sel.splice(n, 1); else st.sel.push(o.id);
+        if (st.sel.indexOf(st.cover) < 0) st.cover = st.sel[0] || null; draw();
+      } }, cachedImg('ho' + o.id, o.img, ''), h('span', { class: 'hl-n', text: n >= 0 ? String(n + 1) : '' }),
+        h('span', { class: 'hl-d', text: new Date(o.at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) })));
+    });
+    coverRow.replaceChildren();
+    if (st.sel.length) {
+      coverRow.append(h('span', { class: 'hint', text: 'Couverture : touche celle que tu veux' }));
+      var strip = h('div', { class: 'hl-row' });
+      st.sel.forEach(function (id) {
+        var o = st.opts.find(function (x) { return x.id === id; }); if (!o) return;
+        strip.append(h('button', { class: 'hl' + (st.cover === id ? ' on' : ''), type: 'button', 'aria-pressed': String(st.cover === id), onclick: function () { st.cover = id; draw(); } }, h('span', { class: 'hl-c' }, cachedImg('hc' + id, o.img, ''))));
+      });
+      coverRow.append(strip);
+    }
+    go.disabled = !st.sel.length;
+  }
+  var form = h('form', { class: 'form', onsubmit: function (e) {
+    e.preventDefault(); if (!st.sel.length) { toast('Choisis au moins un snap.'); return; }
+    var body = { title: title.value.trim(), items: st.sel, cover: st.cover };
+    attempt(hl ? call('PUT', '/api/highlights/' + hl.id, body) : call('POST', '/api/highlights', body), hl ? 'Story à la une modifiée' : 'Ajoutée à ton profil').then(function (r) {
+      if (!r) return; setHighlight(r.highlight.id, r.highlight); closeSheet(); if (S.tab !== 'profile' || S.viewUid) { S.viewUid = null; switchTab('profile'); }
+    });
+  } }, h('div', { class: 'field' }, h('label', { for: 'hl-title', text: 'Nom' }), title), h('span', { class: 'hint', text: 'Tes snaps, même ceux de plus de 24 h (ton archive, visible par toi seul) :' }), grid, coverRow, go,
+    hl ? h('button', { class: 'btn', type: 'button', onclick: function (ev) {
+      var b = ev.currentTarget; if (!b.dataset.armed) { b.dataset.armed = '1'; b.lastChild.textContent = 'Confirmer la suppression'; return; }
+      attempt(call('DELETE', '/api/highlights/' + hl.id), 'Story à la une supprimée').then(function (r) { if (r) { setHighlight(hl.id, null); closeSheet(); } });
+    } }, icon('trash'), h('span', { text: 'Supprimer « ' + hl.title + ' »' })) : null);
+  openSheet(hl ? 'Modifier « ' + hl.title + ' »' : 'Nouvelle story à la une', form);
+  call('GET', '/api/archive').then(function (r) {
+    var opts = r.stories.map(function (s) { return { id: s.id, img: s.img, at: s.at }; });
+    // les snaps déjà à la une dont l'archive a été vidée restent proposés
+    if (hl) hl.items.forEach(function (it) { if (!opts.some(function (o) { return o.id === it.id; })) opts.push({ id: it.id, img: it.img, at: it.at }); });
+    st.opts = opts.sort(function (a, b) { return b.at - a.at; }); st.loading = false; draw();
+  }, function (e) { st.loading = false; grid.replaceChildren(h('p', { class: 'hint', text: e.message })); });
+  draw();
+}
+
 /* ---------------- snaps */
 var SVs = null;
 function openStories(groups, gi) {
   var g = groups[gi]; if (!g) return;
-  var si = g.items.findIndex(function (s) { return !S.seen.has(s.id); });
+  var si = g.hl ? (g.start || 0) : g.items.findIndex(function (s) { return !S.seen.has(s.id); });
   SVs = { groups: groups, gi: gi, si: si < 0 ? 0 : si, elapsed: 0, last: performance.now(), paused: false, raf: 0, down: 0 };
   $('#story').hidden = false; buildStory(); SVs.raf = requestAnimationFrame(tick);
 }
@@ -1170,11 +1260,20 @@ function buildStory() {
   var moreBtn = h('button', { class: 'sv-ic dots', type: 'button', 'aria-label': 'Plus d’options', onclick: function () {
     if (menu) { closeMenu(); return; }
     SVs.menu = true;
-    var del = canDel ? h('button', { class: 'danger', type: 'button', onclick: function () {
+    var del = g.hl ? (mine ? h('button', { class: 'danger', type: 'button', onclick: function () {
+      if (!del.dataset.armed) { del.dataset.armed = '1'; del.textContent = g.items.length > 1 ? 'Confirmer : retirer de la une' : 'Confirmer : supprimer « ' + g.hl.title + ' »'; return; }
+      var hl = g.hl, rest = g.items.filter(function (x) { return x.id !== s.id; }).map(function (x) { return x.id; });
+      var p = rest.length ? call('PUT', '/api/highlights/' + hl.id, { items: rest }) : call('DELETE', '/api/highlights/' + hl.id);
+      attempt(p, rest.length ? 'Snap retiré de la une' : 'Story à la une supprimée').then(function (r) { if (r) { setHighlight(hl.id, r.highlight || null); closeStory(); } });
+    } }, 'Retirer ce snap de la une') : null)
+      : canDel ? h('button', { class: 'danger', type: 'button', onclick: function () {
       if (!del.dataset.armed) { del.dataset.armed = '1'; del.textContent = 'Confirmer la suppression'; return; }
       attempt(call('DELETE', '/api/stories/' + s.id), 'Snap supprimé').then(function (r) { if (r) { S.stories = S.stories.filter(function (x) { return x.id !== s.id; }); closeStory(); } });
     } }, 'Supprimer ce snap') : null;
-    menu = h('div', { class: 'sv-menu', role: 'menu' }, del,
+    menu = h('div', { class: 'sv-menu', role: 'menu' },
+      mine && !g.hl ? h('button', { type: 'button', onclick: function () { closeStory(); addToHighlight(s.id); } }, 'Ajouter à la une') : null,
+      mine && g.hl ? h('button', { type: 'button', onclick: function () { var hl = g.hl; closeStory(); editHighlight(hl); } }, 'Modifier la story à la une') : null,
+      del,
       !mine ? h('button', { type: 'button', onclick: function () { closeStory(); showProfile(g.uid); } }, 'Voir le profil') : null,
       h('button', { type: 'button', onclick: closeMenu }, 'Annuler'));
     root.append(menu);
@@ -1182,7 +1281,7 @@ function buildStory() {
   var top = h('div', { class: 'sv-top' },
     h('div', { class: 'sv-bars' }, g.items.map(function (_, i) { return h('span', { class: 'sv-bar' }, h('i', { style: 'width:' + (i < SVs.si ? 100 : 0) + '%' })); })),
     h('div', { class: 'sv-head' },
-      h('button', { class: 'sv-who', type: 'button', onclick: function () { if (!mine) { closeStory(); showProfile(g.uid); } } }, avatar(g.uid, 32), h('b', { text: mine ? 'Ton snap' : (w.handle || w.name) }), h('time', { text: ago(s.at) }), s.close ? h('span', { class: 'cf-tag' }, icon('star'), 'Amis proches') : null),
+      h('button', { class: 'sv-who', type: 'button', onclick: function () { if (!mine) { closeStory(); showProfile(g.uid); } } }, avatar(g.uid, 32), h('b', { text: g.hl ? g.hl.title : mine ? 'Ton snap' : (w.handle || w.name) }), h('time', { text: g.hl ? new Date(s.at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: new Date(s.at).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }) : ago(s.at) }), s.close ? h('span', { class: 'cf-tag' }, icon('star'), 'Amis proches') : null),
       pauseBtn, moreBtn,
       h('button', { class: 'sv-ic', type: 'button', 'aria-label': 'Fermer', onclick: closeStory }, icon('close'))));
 
@@ -1198,13 +1297,17 @@ function buildStory() {
 
   // bas : réponse en pilule, cœur, envoyer
   var foot;
-  if (mine) {
+  if (mine && g.hl) {
+    foot = h('div', { class: 'sv-foot' }, h('span', { class: 'sv-note' }, icon('star'), ' À la une · reste sur ton profil'),
+      h('button', { class: 'sv-pill', type: 'button', onclick: function () { var hl = g.hl; closeStory(); editHighlight(hl); } }, 'Modifier'));
+  } else if (mine) {
     var left = Math.max(1, Math.round((s.at + DAY - Date.now()) / 36e5));
     var cur = S.stories.find(function (x) { return x.id === s.id; }) || s, vs = cur.views || [];
     // nombre de vues pour tout le monde, les noms avec Bulle+
     var seenTxt = !vs.length ? 'Pas encore vu' : hasPlus() ? 'Vu par ' + vs.map(function (u) { return who(u).name; }).join(', ') : 'Vu par ' + vs.length + (vs.length > 1 ? ' personnes' : ' personne');
     foot = h('div', { class: 'sv-foot' }, h('span', { class: 'sv-note' }, icon('eye'), ' ', seenTxt, ' · disparaît dans ' + left + ' h'),
-      vs.length && !hasPlus() ? h('button', { class: 'sv-ic', type: 'button', 'aria-label': 'Voir qui a regardé (Bulle+)', onclick: function () { closeStory(); openPlans('Voir qui a regardé tes snaps, c’est avec Bulle+.'); } }, h('span', { class: 'tier', text: '+' })) : null);
+      vs.length && !hasPlus() ? h('button', { class: 'sv-ic', type: 'button', 'aria-label': 'Voir qui a regardé (Bulle+)', onclick: function () { closeStory(); openPlans('Voir qui a regardé tes snaps, c’est avec Bulle+.'); } }, h('span', { class: 'tier', text: '+' })) : null,
+      h('button', { class: 'sv-pill', type: 'button', 'aria-label': 'Mettre ce snap à la une de ton profil', onclick: function () { closeStory(); addToHighlight(s.id); } }, icon('star'), 'À la une'));
   } else {
     var liked = LS.get('storyLikes', []).indexOf(s.id) >= 0;
     var ri = h('input', { id: 'sv-reply', class: 'sv-reply', placeholder: 'Répondre à ' + (w.handle || w.name) + '…', maxlength: '500', autocomplete: 'off', 'aria-label': 'Réponse au snap', enterkeyhint: 'send' });

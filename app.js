@@ -126,7 +126,7 @@ var THEMES = [
   { id: 'soleil', name: 'Soleil', sw: ['#FFD8A1', '#1E1206'], plus: true },
   { id: 'encre', name: 'Encre', sw: ['#ECECEC', '#111111'], plus: true }
 ];
-var PREFS = Object.assign({ mode: 'auto', theme: 'bulle', notif: true, preview: true, heads: true, moment: true }, LS.get('prefs', {}));
+var PREFS = Object.assign({ mode: 'auto', theme: 'bulle', notif: true, preview: true, heads: true, moment: true, snapAlerts: true, snapDl: false }, LS.get('prefs', {}));
 function savePrefs() { LS.set('prefs', PREFS); }
 var darkMQ = window.matchMedia('(prefers-color-scheme: dark)');
 function hasPlus() { return !!(S.me && (S.me.plan === 'plus' || S.me.plan === 'pro')); }
@@ -609,7 +609,7 @@ function openNote(n) {
 /* ---------------- activité (j'aime, commentaires, vues) */
 function actSeen() { return LS.get('actSeen.' + S.me.id, 0); }
 function renderActDot() { var d = $('#act-dot'); if (d) d.hidden = !S.activity.some(function (a) { return a.at > actSeen(); }); }
-var ACT = { like: 'a aimé ta photo.', comment: 'a commenté : ', view: 'a vu ton snap.', moment: 'a réagi à ton Moment Bulle ' };
+var ACT = { like: 'a aimé ta photo.', comment: 'a commenté : ', view: 'a vu ton snap.', moment: 'a réagi à ton Moment Bulle ', save: 'a enregistré ton snap (tu l’avais autorisé).' };
 function openActivity() { openSheet('Activité', h('div', { id: 'act-list', class: 'act' }), { type: 'activity' }); renderActivity(); }
 function renderActivity() {
   var box = $('#act-list'); if (!box) return; box.replaceChildren();
@@ -672,7 +672,11 @@ function renderMsgs() {
   box.replaceChildren();
   var c = S.openChat, group = c.kind === 'group', me = S.me.id, ms = S.msgs, lastDay = '';
   if (!ms.length) box.append(h('div', { class: 'empty' }, group ? groupAvatar(72) : avatar(otherOf(c), 72), h('p', { text: group ? 'Lance la discussion avec tout le monde.' : 'Dis bonjour à ' + who(otherOf(c)).name + '.' })));
+  // les snaps en cours de la personne apparaissent dans la discussion, à leur heure
+  var evs = group ? [] : S.stories.filter(function (x) { return x.by === otherOf(c) && x.at > Date.now() - DAY; });
+  function flushEv(until) { while (evs.length && evs[0].at <= until) { var ev0 = evs.shift(), dd = dayLabel(ev0.at); if (dd !== lastDay) { box.append(h('div', { class: 'sep', text: dd })); lastDay = dd; } box.append(snapEventCard(ev0, ms)); } }
   ms.forEach(function (m, i) {
+    flushEv(m.at);
     var d = dayLabel(m.at); if (d !== lastDay) { box.append(h('div', { class: 'sep', text: d })); lastDay = d; }
     var prev = ms[i - 1], next = ms[i + 1];
     var first = !prev || prev.by !== m.by || dayLabel(prev.at) !== d || m.at - prev.at > 5 * 6e4;
@@ -681,6 +685,7 @@ function renderMsgs() {
     if (group && !mine && first) box.append(h('div', { class: 'sender', text: who(m.by).name }));
     var col = h('div', { class: 'mcol' });
     if (m.reply === 'snap') col.append(h('span', { class: 'rtag', text: mine ? 'Tu as réagi à son snap' : 'A réagi à ton snap' }));
+    if (m.story) col.append(storyRefBlock(m.story, mine));
     if (m.reply === 'note') col.append(h('span', { class: 'rtag', text: mine ? 'Tu as répondu à sa note' : 'A répondu à ta note' }), m.ref ? h('span', { class: 'quote note', text: m.ref }) : '');
     if (m.quote) col.append(h('button', { class: 'quote', type: 'button', onclick: function () { var t = $('[data-mid="' + m.quote.id + '"]'); if (t) { t.scrollIntoView({ block: 'center', behavior: 'smooth' }); t.classList.add('flash'); setTimeout(function () { t.classList.remove('flash'); }, 1200); } } },
       h('b', { text: m.quote.by === me ? 'Toi' : who(m.quote.by).name }), h('span', { text: m.quote.text })));
@@ -701,6 +706,7 @@ function renderMsgs() {
     if (!mine) row.append(last ? h('span', { class: 'mav', onclick: storyTap }, ringAv(m.by, 28)) : h('span', { class: 'spacer' }));
     row.append(col); box.append(row);
   });
+  flushEv(Infinity);
   if (near || S.forceBottom) { box.scrollTop = box.scrollHeight; S.forceBottom = false; }
   syncVoice();
 }
@@ -887,6 +893,67 @@ function syncVoice() {
     el.querySelector('.vspeed').textContent = RATE + '×';
   });
 }
+/* ---------------- télécharger un snap (si son auteur l'a autorisé) */
+var THUMBS = {};
+// petite vignette du snap jointe à une réponse (les messages n'emportent pas l'image en entier)
+function snapThumb(src) {
+  if (THUMBS[src]) return THUMBS[src];
+  try { var im = Array.prototype.find.call(document.images, function (i) { return i.src === src && i.complete && i.naturalWidth; }); if (!im) { im = new Image(); im.src = src; } if (!im.naturalWidth) return ''; var c = document.createElement('canvas'); c.width = 108; c.height = 192; var x = c.getContext('2d'), k = Math.max(108 / (im.naturalWidth || 108), 192 / (im.naturalHeight || 192)); x.fillStyle = '#222'; x.fillRect(0, 0, 108, 192); if (im.naturalWidth) x.drawImage(im, (108 - im.naturalWidth * k) / 2, (192 - im.naturalHeight * k) / 2, im.naturalWidth * k, im.naturalHeight * k); return (THUMBS[src] = c.toDataURL('image/jpeg', 0.7)); } catch (e) { return ''; }
+}
+function storyRef(s) { return { id: s.id, thumb: snapThumb(s.img) }; }
+function snapName(by, at) { var d = new Date(at || Date.now()); return 'bulle-snap-' + (who(by).handle || 'ami') + '-' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0') + '-' + String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0') + '.jpg'; }
+function downloadImg(url, name) {
+  // sur téléphone : feuille de partage (« Enregistrer l'image ») ; sinon téléchargement classique
+  fetch(url).then(function (r) { return r.blob(); }).then(function (blob) {
+    var file = new File([blob], name, { type: 'image/jpeg' });
+    if (window.matchMedia('(pointer:coarse)').matches && navigator.canShare && navigator.canShare({ files: [file] })) return navigator.share({ files: [file], title: 'Snap Bulle' }).then(function () { toast('Snap enregistré'); }, function () {});
+    var a = h('a', { href: URL.createObjectURL(blob), download: name }); document.body.append(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000); toast('Snap téléchargé');
+  }).catch(function () { toast('Le téléchargement n’a pas marché.'); });
+}
+function saveSnap(s, img) {
+  if (img) { downloadImg(img, snapName(s.by, s.at)); return; }
+  call('GET', '/api/stories/' + s.id + '/image').then(function (r) { downloadImg(r.img, snapName(r.by, r.at)); }, function (e) { toast(e.message); });
+}
+function openStoryById(id, reply) {
+  var gs = storyGroups(), gi = gs.findIndex(function (g) { return g.items.some(function (x) { return x.id === id; }); }); if (gi < 0) { toast('Ce snap n’est plus disponible.'); return; }
+  openStories(gs, gi); var si = gs[gi].items.findIndex(function (x) { return x.id === id; }); if (SVs && si >= 0 && SVs.si !== si) { SVs.si = si; buildStory(); }
+  if (reply) setTimeout(function () { var r = $('#sv-reply'); if (r) { r.focus(); r.dispatchEvent(new FocusEvent('focus')); } }, 80);
+}
+// dans une réponse : vignette du snap + « Télécharger » si c'est permis
+function storyRefBlock(ref, mine) {
+  var author = ref.by, mineSnap = author === S.me.id;
+  return h('div', { class: 'sref' + (mine ? ' me' : '') },
+    h('button', { class: 'sref-th', type: 'button', 'aria-label': ref.live ? 'Revoir le snap' : 'Snap expiré', onclick: function () { if (ref.live) openStoryById(ref.id); else toast('Ce snap a disparu (plus de 24 h).'); } },
+      ref.thumb ? h('img', { src: ref.thumb, alt: '' }) : h('span', { text: '📸' }), ref.live ? null : h('span', { class: 'sref-x', text: 'Expiré' })),
+    h('span', { class: 'sref-t' }, h('small', { text: mineSnap ? 'Ton snap' : 'Snap de ' + who(author).name }),
+      ref.live && ref.dl ? h('button', { class: 'sref-dl', type: 'button', onclick: function () { saveSnap({ id: ref.id, by: author }); } }, icon('download'), 'Télécharger')
+        : h('small', { class: 'sref-no', text: !ref.live ? 'Plus disponible' : 'Téléchargement non autorisé' })));
+}
+// « Lou a publié un snap » : apparaît dans la discussion, avec Voir / Répondre (puis Télécharger une fois que tu as répondu)
+function snapEventCard(s, ms) {
+  var w = who(s.by), replied = ms.some(function (m) { return m.by === S.me.id && m.story && m.story.id === s.id; });
+  return h('div', { class: 'sev', 'data-story-ev': s.id },
+    h('button', { class: 'sev-th', type: 'button', 'aria-label': 'Voir le snap de ' + w.name, onclick: function () { openStoryById(s.id); } }, h('img', { src: snapThumb(s.img) || s.img, alt: '' })),
+    h('div', { class: 'sev-b' },
+      h('b', { text: '📸 ' + w.name + ' a publié un snap' }), h('small', { text: hhmm(s.at) + (s.close ? ' · amis proches' : '') + (s.dl ? ' · téléchargeable' : '') }),
+      h('div', { class: 'sev-acts' },
+        h('button', { class: 'btn small', type: 'button', onclick: function () { openStoryById(s.id); } }, 'Voir'),
+        h('button', { class: 'btn small', type: 'button', onclick: function () { openStoryById(s.id, true); } }, icon('reply'), 'Répondre'),
+        s.dl && replied ? h('button', { class: 'btn small primary', type: 'button', onclick: function () { saveSnap(s); } }, icon('download'), 'Télécharger') : null),
+      s.dl && !replied ? h('small', { class: 'sev-hint', text: 'Réponds à son snap pour pouvoir le télécharger.' }) : null));
+}
+var snapAlertT = null;
+function snapAlert(s) {
+  if (!PREFS.snapAlerts) return;
+  var w = who(s.by);
+  if (document.hidden) { if (PREFS.notif && 'Notification' in window && Notification.permission === 'granted' && swReg) swReg.showNotification(w.name + ' a publié un snap', { body: (s.text || 'Appuie pour le voir') + (s.dl ? ' · téléchargeable' : ''), icon: 'icons/icon-192.png', badge: 'icons/favicon-32.png', tag: 'story-' + s.by, data: { storyId: s.id } }).catch(function () {}); return; }
+  if (SVs) return;
+  var el = $('#hu');
+  el.replaceChildren(h('button', { class: 'hu-in', type: 'button', onclick: function () { el.hidden = true; closeSheet(); openStoryById(s.id); } },
+    ringAv(s.by, 40), h('span', { class: 't' }, h('b', { text: w.name + ' a publié un snap' }), h('span', { text: s.dl ? 'Appuie pour le voir · téléchargeable' : 'Appuie pour le voir' }))));
+  el.hidden = false; clearTimeout(huT); huT = setTimeout(function () { el.hidden = true; }, 5000);
+}
 function sendMsg(chat, payload) {
   return attempt(call('POST', '/api/chats/' + chat.id + '/messages', payload)).then(function (r) {
     if (!r) return false;
@@ -1007,6 +1074,7 @@ function renderSettings() {
       perm === 'denied' || perm === 'unsupported'),
     swRow('Aperçu du message', PREFS.preview, function (v) { PREFS.preview = v; savePrefs(); }, 'Sinon la notification dit juste « Nouveau message ».'),
     swRow('Bandeau dans l’app', PREFS.heads, function (v) { PREFS.heads = v; savePrefs(); }, 'Un bandeau en haut de l’écran quand un message arrive ailleurs.'),
+    swRow('Nouveaux snaps de mes amis', PREFS.snapAlerts, function (v) { PREFS.snapAlerts = v; savePrefs(); }, 'Un bandeau « Lou a publié un snap ».'),
     swRow('Moment Bulle', PREFS.moment, function (v) { PREFS.moment = v; savePrefs(); }, 'L’alerte du jour à l’heure surprise. Tu as 2 minutes pour poster.'),
     navRow('spark', 'Déclencher un Moment maintenant', function () { closeSheet(); switchTab('feed'); momentTest(); }, 'Version test : pour essayer sans attendre l’heure surprise'),
     notifOn ? navRow('bell', 'Tester une notification', function () { testNotif(); }) : null
@@ -1017,6 +1085,7 @@ function renderSettings() {
   sec('Confidentialité', [
     swRow('Mode fantôme', pv.ghost, function (v) { setPrivacy({ ghost: v }); }, 'Tes amis ne voient plus ta position sur la carte.'),
     swRow('Afficher quand je suis en ligne', pv.showOnline, function (v) { setPrivacy({ showOnline: v }); }, 'Le point vert à côté de ta photo.'),
+    swRow('Autoriser le téléchargement de mes snaps', PREFS.snapDl, function (v) { PREFS.snapDl = v; savePrefs(); renderSheetDyn(); }, 'Réglage par défaut. Tu peux le changer pour chaque snap au moment de l’envoyer.'),
     swRow('Confirmations de lecture', pv.readReceipts, function (v) { setPrivacy({ readReceipts: v }); }, 'Si tu les coupes, tu ne vois plus non plus quand les autres ont lu (« Vu »).'),
     h('div', { class: 'setrow', style: 'cursor:default;flex-wrap:wrap' }, h('span', { class: 'x', style: 'flex:1' }, h('span', { text: 'Qui peut m’écrire' })),
       h('div', { class: 'seg', role: 'radiogroup', 'aria-label': 'Qui peut m’écrire', style: 'width:100%' }, [['all', 'Tout le monde'], ['friends', 'Mes amis']].map(function (o) {
@@ -1455,7 +1524,10 @@ function openComposer(mode) {
       st.pick ? closePicker(function () { if (closeList().length && !st.close) st.close = true; drawAud(); }) : '');
   }
   drawAud();
-  var snapField = h('div', { class: 'field' }, edBtn, aud, h('span', { class: 'hint', text: 'Visible 24 h, puis il disparaît. Les amis proches voient un contour vert.' }));
+  st.dl = !!PREFS.snapDl;
+  var dlRow = swRow('Autoriser le téléchargement', st.dl, function (v) { st.dl = v; }, 'Tes amis pourront l’enregistrer avec ⋯ → Télécharger, ou depuis leur réponse dans les messages.');
+  dlRow.id = 'cmp-dl';
+  var snapField = h('div', { class: 'field' }, edBtn, aud, dlRow, h('span', { class: 'hint', text: 'Visible 24 h, puis il disparaît. Les amis proches voient un contour vert.' }));
   var go = h('button', { class: 'btn primary', type: 'submit' }, 'Partager');
   function setFile(f) {
     if (!f || !/^image\//.test(f.type)) { if (f) toast('Choisis une image (JPEG, PNG…).'); return; }
@@ -1485,7 +1557,7 @@ function openComposer(mode) {
     shrink(st.file, st.mode === 'snap' ? 1440 : 0).then(function (img) { return st.filter === 'none' ? img : applyFilter(img, st.filter, 0, 0.84); }).then(function (img) { return st.mode === 'snap' && st.layers.length ? renderSnap(img, st.layers, 1080) : img; }).then(function (img) {
       return st.mode === 'post'
         ? attempt(call('POST', '/api/posts', { image: img, caption: cap.value.trim() }), 'Publié').then(function (r) { if (r) { upsert(S.posts, r.post, byNewest); } return r; })
-        : attempt(call('POST', '/api/stories', { image: img, text: '', close: !!st.close }), st.close ? 'Snap envoyé à tes amis proches' : 'Snap envoyé · visible 24 h').then(function (r) { if (r) { upsert(S.stories, r.story, byOldest); renderFeed(); } return r; });
+        : attempt(call('POST', '/api/stories', { image: img, text: '', close: !!st.close, dl: !!st.dl }), st.close ? 'Snap envoyé à tes amis proches' : 'Snap envoyé · visible 24 h').then(function (r) { if (r) { upsert(S.stories, r.story, byOldest); renderFeed(); } return r; });
     }, function () { toast('Cette image n’a pas pu être lue. Essaie un JPEG ou un PNG.'); return false; })
       .then(function (r) { go.disabled = false; go.textContent = label; if (r) { closeSheet(); if (S.openChat) closeThread(); switchTab('feed'); } });
   } }, seg, drop, frow, pick, cam, h('div', { class: 'pick-row' }, h('label', { class: 'btn small', for: 'cmp-pick' }, icon('image'), 'Galerie'), h('label', { class: 'btn small', for: 'cmp-cam' }, icon('camera'), 'Appareil photo')), capField, snapField, go);
@@ -1593,7 +1665,7 @@ function markSeen(id) { if (S.seen.has(id)) return; S.seen.add(id); LS.set('seen
 function buildStory() {
   var g = SVs.groups[SVs.gi], s = g.items[SVs.si]; if (!s) { closeStory(); return; }
   markSeen(s.id); SVs.elapsed = 0; SVs.last = performance.now(); SVs.paused = false; SVs.menu = false;
-  var mine = g.uid === S.me.id, canDel = mine || S.me.admin, w = who(g.uid);
+  var mine = g.uid === S.me.id, canDel = mine, w = who(g.uid);
   var root = $('#story');
 
   // en-tête : avatar rond, nom, heure — puis pause, menu, fermer
@@ -1620,6 +1692,7 @@ function buildStory() {
       mine && !g.hl ? h('button', { type: 'button', onclick: function () { closeStory(); addToHighlight(s.id); } }, 'Ajouter à la une') : null,
       mine && g.hl ? h('button', { type: 'button', onclick: function () { var hl = g.hl; closeStory(); editHighlight(hl); } }, 'Modifier la story à la une') : null,
       del,
+      mine || s.dl ? h('button', { type: 'button', id: 'sv-dl', onclick: function () { closeMenu(); saveSnap(s, g.hl ? s.img : null); } }, 'Télécharger') : h('button', { type: 'button', class: 'muted', 'aria-disabled': 'true', onclick: function () { toast(w.name + ' n’autorise pas le téléchargement de ce snap.'); } }, 'Téléchargement non autorisé'),
       !mine ? h('button', { type: 'button', onclick: function () { closeStory(); showProfile(g.uid); } }, 'Voir le profil') : null,
       h('button', { type: 'button', onclick: closeMenu }, 'Annuler'));
     root.append(menu);
@@ -1661,7 +1734,7 @@ function buildStory() {
     var quick = h('div', { class: 'sv-quick', hidden: true }, ['😂', '😮', '😍', '😢', '👏', '🔥'].map(function (e) {
       return h('button', { type: 'button', class: 'emo', 'aria-label': 'Réagir ' + e, onpointerdown: function (ev) { ev.preventDefault(); }, onclick: function (ev) {
         emojiBurst(ev.clientX || 0, ev.clientY || 0, e); ri.blur();
-        sendMsg(dmFor(g.uid), { text: e, reply: 'snap' }).then(function (ok) { if (ok) toast('Réaction envoyée à ' + w.name); });
+        sendMsg(dmFor(g.uid), { text: e, reply: 'snap', story: storyRef(s) }).then(function (ok) { if (ok) toast('Réaction envoyée à ' + w.name); });
       } }, e);
     }));
     ri.addEventListener('focus', function () { SVs.paused = true; quick.hidden = false; });
@@ -1671,9 +1744,9 @@ function buildStory() {
       liked = true; heart.classList.add('liked'); heart.setAttribute('aria-pressed', 'true');
       var l = LS.get('storyLikes', []); l.push(s.id); LS.set('storyLikes', l.slice(-500));
       var r = heart.getBoundingClientRect(); burst(r.left + r.width / 2, r.top);
-      sendMsg(dmFor(g.uid), { text: '❤️', reply: 'snap' });
+      sendMsg(dmFor(g.uid), { text: '❤️', reply: 'snap', story: storyRef(s) });
     } }, icon('heart'));
-    var send = function () { var t = ri.value.trim(); if (!t) { ri.focus(); return; } ri.value = ''; ri.blur(); sendMsg(dmFor(g.uid), { text: t, reply: 'snap' }).then(function (ok) { if (ok) toast('Réponse envoyée à ' + w.name); }); };
+    var send = function () { var t = ri.value.trim(); if (!t) { ri.focus(); return; } ri.value = ''; ri.blur(); sendMsg(dmFor(g.uid), { text: t, reply: 'snap', story: storyRef(s) }).then(function (ok) { if (ok) toast('Réponse envoyée à ' + w.name); }); };
     foot = h('form', { class: 'sv-foot', onsubmit: function (e) { e.preventDefault(); send(); } }, quick, ri, heart,
       h('button', { class: 'sv-ic', type: 'submit', 'aria-label': 'Envoyer' }, icon('send')));
   }
@@ -1875,7 +1948,11 @@ function connectEvents() {
   on('user', function (u) { S.users[u.id] = u; if (u.id === S.me.id) { S.me = u; applyLook(); } renderAll(); });
   on('post', function (p) { upsert(S.posts, p, byNewest); renderFeed(); renderSheetDyn(); if (S.tab === 'profile') renderProfile(); });
   on('post-del', function (d) { removePost(d.id); });
-  on('story', function (s) { upsert(S.stories, s, byOldest); if (!SVs) renderFeed(); });
+  on('story', function (s) {
+    var isNew = !S.stories.some(function (x) { return x.id === s.id; });
+    upsert(S.stories, s, byOldest); if (!SVs) renderFeed();
+    if (isNew && s.by !== S.me.id) { snapAlert(s); renderChatList(); if (S.openChat && otherOf(S.openChat) === s.by) renderMsgs(); }
+  });
   on('story-del', function (d) { S.stories = S.stories.filter(function (x) { return x.id !== d.id; }); if (!SVs) renderFeed(); });
   on('chat', function (c) { upsert(S.chats, c); if (S.openChat && S.openChat.id === c.id) { S.openChat = c; markRead(c.id); renderMsgs(); } renderChatList(); renderNav(); });
   on('msgupd', function (d) {
@@ -1935,6 +2012,7 @@ function start() {
     if (q.get('tab')) switchTab(tabs.indexOf(q.get('tab')) >= 0 ? q.get('tab') : 'feed');
     if (q.get('create')) openComposer(q.get('create') === 'snap' ? 'snap' : 'post');
     if (q.get('moment')) { switchTab('feed'); openMomentCam(); }
+    if (q.get('story')) { switchTab('feed'); openStoryById(q.get('story')); }
     var cid = q.get('chat'); if (cid) { var c = visibleChats().find(function (x) { return x.id === cid; }); if (c) { switchTab('chat'); openChat(c); } }
     if (location.search) history.replaceState(null, '', location.pathname);
   }, function (e) {
@@ -1949,6 +2027,7 @@ window.addEventListener('appinstalled', function () { installEvt = null; toast('
 if ('serviceWorker' in navigator && window.isSecureContext) {
   navigator.serviceWorker.register('sw.js').then(function (reg) { swReg = reg; }).catch(function (e) { console.warn('Service worker', e); });
   navigator.serviceWorker.addEventListener('message', function (e) {
+    if (e.data && e.data.type === 'story' && S.me) { if (S.openChat) closeThread(); switchTab('feed'); openStoryById(e.data.id); }
     if (e.data && e.data.type === 'moment' && S.me) { if (S.openChat) closeThread(); switchTab('feed'); openMomentCam(); }
     if (e.data && e.data.type === 'open-chat' && S.me) { var c = visibleChats().find(function (x) { return x.id === e.data.chatId; }); if (c) { switchTab('chat'); openChat(c); } }
   });

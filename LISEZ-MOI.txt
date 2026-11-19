@@ -110,3 +110,15 @@ Nouveautés v8 : texte et stickers sur les snaps
 - Glisser pour déplacer, pincer à deux doigts pour agrandir et tourner
   (sur ordinateur : molette, Maj + molette pour tourner), glisser sur la poubelle
   pour supprimer.
+
+Nouveautés v9 : télécharger les snaps
+- En envoyant un snap : interrupteur « Autoriser le téléchargement » (désactivé par
+  défaut ; le réglage par défaut est dans Paramètres → Confidentialité).
+- Sur un snap : ⋯ → « Télécharger » (toujours pour les tiens, pour ceux d'un ami
+  seulement s'il l'a autorisé, sinon « Téléchargement non autorisé »).
+- Dans une discussion : carte « 📸 Lou a publié un snap » avec Voir / Répondre.
+  Une fois que tu as répondu, « Télécharger » apparaît (si c'est autorisé), et ta
+  réponse montre une vignette du snap avec un bouton Télécharger.
+- Bandeau « Lou a publié un snap » quand un ami publie (Paramètres → Notifications).
+- Si un ami enregistre ton snap, tu le vois dans l'Activité (la cloche).
+- Les contacts d'exemple publient maintenant un nouveau snap chaque jour.

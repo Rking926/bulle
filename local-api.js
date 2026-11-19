@@ -57,7 +57,7 @@ function pubUser(u) {
 }
 function outPost(p) { return { id: p.id, by: p.by, caption: p.caption, at: p.at, img: p.image, likes: Object.keys(p.likes || {}), comments: p.comments || [] }; }
 // les vues d'un snap ne sont renvoyées qu'à son auteur
-function outStory(s) { return { id: s.id, by: s.by, text: s.text, at: s.at, img: s.image, close: !!s.close, views: s.by === db.me ? Object.keys(s.views || {}) : [] }; }
+function outStory(s) { return { id: s.id, by: s.by, text: s.text, at: s.at, img: s.image, close: !!s.close, dl: !!s.dl, views: s.by === db.me ? Object.keys(s.views || {}) : [] }; }
 // un snap « amis proches » n'est visible que par les personnes de la liste de son auteur
 function canSeeStory(s, uid) { if (!s.close || s.by === uid) return true; var a = db.users[s.by]; return !!(a && a.close && a.close[uid]); }
 // ajoute aux comptes existants ce qui est apparu depuis (notes, snap « amis proches » d'Inès)
@@ -90,7 +90,7 @@ function outHighlight(x, viewer) {
   var a = db.users[x.by], items = x.items.filter(function (it) { return !it.close || x.by === viewer || !!(a && a.close && a.close[viewer]); });
   if (!items.length) return null;
   var cov = items.find(function (it) { return it.id === x.cover; }) || items[0];
-  return { id: x.id, by: x.by, title: x.title, at: x.at, cover: cov.id, coverImg: cov.img, items: items.map(function (it) { return { id: it.id, img: it.img, text: it.text, at: it.at, close: !!it.close }; }) };
+  return { id: x.id, by: x.by, title: x.title, at: x.at, cover: cov.id, coverImg: cov.img, items: items.map(function (it) { return { id: it.id, img: it.img, text: it.text, at: it.at, close: !!it.close, dl: !!it.dl }; }) };
 }
 function myHighlights(uid) { return Object.values(db.highlights || {}).sort(function (a, b) { return a.at - b.at; }).map(function (x) { return outHighlight(x, uid); }).filter(Boolean); }
 function hlItems(u, ids, keep) {
@@ -101,7 +101,7 @@ function hlItems(u, ids, keep) {
     var old = keep && keep.find(function (it) { return it.id === sid; });
     var s = old ? null : (db.stories[sid] || (db.archive || {})[sid]);
     if (old) out.push(old);
-    else if (s && s.by === u.id) out.push({ id: s.id, img: s.image, text: s.text || '', at: s.at, close: !!s.close });
+    else if (s && s.by === u.id) out.push({ id: s.id, img: s.image, text: s.text || '', at: s.at, close: !!s.close, dl: !!s.dl });
   });
   if (!out.length) throw fail(400, 'Choisis au moins un snap.');
   return out;
@@ -111,6 +111,8 @@ function outMsg(m) {
   var o = { id: m.id, by: m.by, at: m.at, text: m.text || '', img: m.once ? '' : (m.image || ''), reply: m.reply || null, ref: m.ref || '', quote: m.quote || null, reacts: m.reacts || {} };
   if (m.once) { o.once = true; o.opened = !!m.openedAt; }
   if (m.audio) { o.audio = m.audio; o.dur = m.dur || 0; o.wave = m.wave || []; }
+  // réponse à un snap : petite vignette + téléchargement possible si l'auteur l'a autorisé
+  if (m.story) { var live = db.stories[m.story.id] || (db.archive || {})[m.story.id]; o.story = { id: m.story.id, by: m.story.by, thumb: m.story.thumb || '', live: !!db.stories[m.story.id], dl: live ? !!live.dl || live.by === db.me : false }; }
   return o;
 }
 // messages vocaux
@@ -217,6 +219,25 @@ function momentState(uid) {
     mine: mine ? outMoment(mine, mt, uid, true) : null,
     friends: before ? [] : Object.values(day).filter(function (m) { return m.by !== uid && db.users[m.by]; }).sort(function (a, b) { return a.at - b.at; }).map(function (m) { return outMoment(m, mt, uid, !!mine); }) };
 }
+// les contacts d'exemple publient un snap par jour, et l'un d'eux en publie un pendant que l'app est ouverte
+var SNAP_TXT = ['Vue du jour ☀️', 'Qui est dispo ce soir ?', 'Café time', '', 'Nouveau son en préparation 🎧', 'Je l’adore celle-là', ''];
+var liveSnapPlanned = false;
+function botSnap(b, at) {
+  var id = rid(12), C = ['#F6B6C8', '#140D10', '#D81B55', '#FFE1EA', '#B9DDF7', '#CDEBD3', '#FFD6A5'], r = rng(hashStr(id)), p = function () { return C[Math.floor(r() * C.length)]; };
+  db.stories[id] = { id: id, by: b.id, at: at, text: pick(SNAP_TXT), image: art(hashStr(id), p(), p(), p(), 720, 1280), dl: Math.random() < 0.6, views: {} };
+  return db.stories[id];
+}
+function botStories(meId) {
+  var now = Date.now();
+  bots().forEach(function (b) {
+    var last = Object.values(db.stories).filter(function (s) { return s.by === b.id; }).reduce(function (m, s) { return Math.max(m, s.at); }, 0);
+    if (now - last > 20 * 36e5) botSnap(b, now - Math.floor(Math.random() * 3 * 36e5));
+  });
+  if (!liveSnapPlanned) {
+    liveSnapPlanned = true;
+    setTimeout(function () { if (!db.me) return; var b = pick(bots()); var s = botSnap(b, Date.now()); s.dl = true; save(); emit('story', outStory(s)); }, 45000 + Math.random() * 45000);
+  }
+}
 function liveNotes() { var cut = Date.now() - DAY; return Object.values(db.notes || {}).filter(function (n) { return n.at > cut && db.users[n.by]; }); }
 function image(v) { if (typeof v !== 'string' || !/^data:image\/(jpeg|png|webp);base64,/.test(v)) throw fail(400, 'Image invalide.'); return v; }
 function me() { var u = db.me && db.users[db.me]; if (!u) throw fail(401, 'Crée ton profil pour commencer.'); return u; }
@@ -251,6 +272,8 @@ function seed(meId) {
   var story = function (by, at, text, img) { var id = rid(12); db.stories[id] = { id: id, by: by, at: at, text: text, image: img }; };
   story(lou, now - 40 * M, 'Devine où je suis', art(101, '#140D10', '#F6B6C8', '#D81B55', 720, 1280));
   story(lou, now - 20 * M, '', art(102, '#F6B6C8', '#140D10', '#FFE1EA', 720, 1280));
+  // Lou autorise le téléchargement de son premier snap (pour voir l'option en action)
+  Object.values(db.stories).filter(function (x) { return x.by === lou; }).sort(function (x, y) { return x.at - y.at; })[0].dl = true;
   story(malo, now - 2 * H, 'Concert samedi, qui vient ?', art(103, '#D81B55', '#140D10', '#F6B6C8', 720, 1280));
   story(ines, now - 5 * H, '', art(104, '#FFE1EA', '#140D10', '#D81B55', 720, 1280));
   var msg = function (cid, by, at, text) { (db.msgs[cid] = db.msgs[cid] || []).push({ id: rid(12), by: by, at: at, text: text }); var c = db.chats[cid]; c.lastAt = at; c.lastText = text; c.lastBy = by; };
@@ -342,6 +365,7 @@ route('GET', '/api/state', function () {
   db.archive = db.archive || {};
   Object.values(db.stories).forEach(function (s) { if (s.at < cut) { if (s.by === u.id) db.archive[s.id] = s; delete db.stories[s.id]; } });
   var ar = Object.values(db.archive).sort(function (a, b) { return b.at - a.at; }); ar.slice(100).forEach(function (s) { delete db.archive[s.id]; });
+  botStories(u.id);
   var online = [u.id].concat(bots().filter(function (b) { return b.handle !== 'ines_b'; }).map(function (b) { return b.id; }));
   return {
     me: pubUser(u), users: Object.values(db.users).map(pubUser),
@@ -419,7 +443,7 @@ route('DELETE', '/api/posts/([0-9a-f]{12})/comments/([0-9a-f]{10})', function (b
 });
 route('DELETE', '/api/posts/([0-9a-f]{12})', function (b, id) { me(); getPost(id); delete db.posts[id]; save(); return { ok: true }; });
 route('POST', '/api/stories', function (b) {
-  var u = me(); var s = { id: rid(12), by: u.id, text: str(b.text, 80), image: image(b.image), at: Date.now(), views: {}, close: !!b.close };
+  var u = me(); var s = { id: rid(12), by: u.id, text: str(b.text, 80), image: image(b.image), at: Date.now(), views: {}, close: !!b.close, dl: !!b.dl };
   if (s.close && !Object.keys(u.close || {}).length) throw fail(400, 'Ta liste d’amis proches est vide : ajoute quelqu’un d’abord.');
   db.stories[s.id] = s; save();
   // les contacts d'exemple regardent ton snap au bout de quelques secondes (seulement tes amis proches si c'est pour eux)
@@ -427,8 +451,17 @@ route('POST', '/api/stories', function (b) {
     if (!canSeeStory(s, bt.id) || Math.random() < 0.2) return;
     setTimeout(function () { var x = db.stories[s.id]; if (!x) return; x.views = x.views || {}; x.views[bt.id] = Date.now(); emit('story', outStory(x)); pushAct('view', bt.id, { story: s.id }); save(); }, 3000 + i * 4000 + Math.random() * 2500);
   });
+  // si le téléchargement est autorisé, un ami l'enregistre parfois (tu es prévenu dans l'Activité)
+  if (s.dl) { var sv = pick(bots().filter(function (bt) { return canSeeStory(s, bt.id); })); if (sv) setTimeout(function () { if (!db.stories[s.id]) return; pushAct('save', sv.id, { story: s.id }); save(); }, 9000 + Math.random() * 5000); }
   addScore(u.id, 5); save();
   return { story: outStory(s) };
+});
+// télécharger un snap : toujours le tien, celui d'un ami seulement s'il l'a autorisé
+route('GET', '/api/stories/([0-9a-f]{12})/image', function (b, id) {
+  var u = me(), s = db.stories[id] || ((db.archive || {})[id] && db.archive[id].by === u.id ? db.archive[id] : null);
+  if (!s || !canSeeStory(s, u.id)) throw fail(404, 'Ce snap n’est plus disponible (plus de 24 h).');
+  if (s.by !== u.id && !s.dl) throw fail(403, (db.users[s.by] || {}).name + ' n’autorise pas le téléchargement de ce snap.');
+  return { img: s.image, by: s.by, at: s.at };
 });
 route('DELETE', '/api/stories/([0-9a-f]{12})', function (b, id) { me(); delete db.stories[id]; save(); return { ok: true }; });
 route('GET', '/api/moment', function () { return { moment: momentState(me().id) }; });
@@ -498,6 +531,10 @@ route('POST', '/api/chats/' + CHAT + '/messages', function (b, cid) {
   var m = { id: rid(12), by: u.id, at: Date.now(), text: once ? '' : text, image: img, reply: reply, ref: reply ? str(b.ref, 80) : '',
     quote: qm ? { id: qm.id, by: qm.by, text: qm.once ? '📸 Snap' : qm.audio ? '🎤 Message vocal' : (qm.text ? qm.text.slice(0, 80) : '📷 Photo') } : null };
   if (once) m.once = true;
+  if (b.story && typeof b.story.id === 'string') {
+    var rs = db.stories[b.story.id];
+    if (rs && canSeeStory(rs, u.id)) { m.story = { id: rs.id, by: rs.by, thumb: typeof b.story.thumb === 'string' && b.story.thumb.length < 60000 && b.story.thumb.indexOf('data:image/jpeg;base64,') === 0 ? b.story.thumb : '' }; m.reply = 'snap'; }
+  }
   if (snd) { m.audio = snd; m.dur = Math.max(0, Math.min(600, +b.dur || 0)); m.wave = cleanWave(b.wave); }
   list.push(m); while (list.length > 300) list.shift();
   c.lastAt = m.at; c.lastText = msgLabel(m); c.lastBy = u.id;
